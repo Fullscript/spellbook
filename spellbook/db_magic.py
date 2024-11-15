@@ -1,15 +1,33 @@
 from snowflake.snowpark import Session
 import os 
 import json 
-import pandas as pd
 from sqlalchemy import create_engine
 import random
-import snowflake.connector
+from snowflake.snowpark.session import Session
+from snowflake.snowpark import functions as F
+from snowflake.snowpark.types import *
+import pandas as pd
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import dsa
+from cryptography.hazmat.primitives import serialization
+import base64 
 
 # Needs a very specific pip install
 # pip install "snowflake-connector-python[pandas]"
 
 def get_sf_creds(db_name):
+    p_key= serialization.load_pem_private_key(
+    base64.b64decode(os.getenv('SNOW_PK')),
+    password=os.getenv('SNOW_PK_PASSPHRASE').encode('ascii'),
+    backend=default_backend()
+    )
+
+    pkb = p_key.private_bytes(
+    encoding=serialization.Encoding.DER,
+    format=serialization.PrivateFormat.PKCS8,
+    encryption_algorithm=serialization.NoEncryption())
+
     # Key value pairs of various snowflake databases
     dbs = {'snow_s':'staging_db',
         'snow_a':'analytics_db',
@@ -19,7 +37,7 @@ def get_sf_creds(db_name):
     'account': os.getenv('SNOWFLAKE_URL'),
     'user': os.getenv('SNOWFLAKE_USER'),
     'role': os.getenv('SNOWFLAKE_ROLE'),
-    'password': os.getenv('SNOWFLAKE_PASSWORD'),
+    "private_key": pkb,
     'warehouse': 'COMPUTE_WH',
     'database': dbs[db_name]
     }
@@ -30,11 +48,12 @@ def snowflake_connect(db_name):
     creds = get_sf_creds(db_name)
     try:
         # Establish the connection
-        con = snowflake.connector.connect(user=creds['user'], password = creds['password'], account=creds['account'], warehouse=creds['warehouse'], role=creds['role'], database=creds['database']) 
+        session = Session.builder.configs(creds).create()
+        print("session created")
     except Exception as e:
         # Handle error
         print('An error was encountered creating the snowflake connection, ', e)        
-    return con
+    return session
 
 def mysql_connect(db_name):
     # Key value pairs of various mysql databases
@@ -99,33 +118,30 @@ def execute_mysql(query, dbname):
 def execute_snowflake(query):
     try:
         # Establish a connection and run the query
-        con = snowflake_connect('snow_s')
-        cur = con.cursor()
-        cur.execute(query)
+        session = snowflake_connect('snow_s')
+        res = session.sql(query)
         print(get_wizard())
     except Exception as e:
         # Handle errors
         print('An error was encountered executing in snowflake, ', e)
     finally:
         # Close the connection
-        con.close()
+        session.close()
 
 def read_snowflake(db_name, script):
     # Create a blank dataframe to be overwritten
     df_extract = pd.DataFrame()
     try:
         # Establish a connection and read the data
-        con = snowflake_connect(db_name)
-        cur = con.cursor()
-        cur.execute(script)
-        df_extract = cur.fetch_pandas_all()
+        session = snowflake_connect(db_name)
+        df_extract = session.sql(script).to_pandas()
     except Exception as e:
         # Handle errors
         print('An error was encountered reading snowflake, ', e)
     finally:
         # Close the connection
-        con.close()        
-    df_extract.columns= df_extract.columns.str.lower()
+        session.close()        
+    df_extract.columns = [x.lower() for x in df_extract.columns]
     return df_extract
 
 def write_data(db_name, schema, df, tname):
