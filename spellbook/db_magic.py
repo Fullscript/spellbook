@@ -1,109 +1,142 @@
+import os
 from snowflake.snowpark import Session
-import os 
-import json 
 from sqlalchemy import create_engine
 import random
-from snowflake.snowpark.session import Session
-from snowflake.snowpark import functions as F
-from snowflake.snowpark.types import *
 import pandas as pd
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.primitives.asymmetric import dsa
 from cryptography.hazmat.primitives import serialization
-import base64 
+import base64
+import utils
 
 # Needs a very specific pip install
 # pip install "snowflake-connector-python[pandas]"
 
-def get_sf_creds(db_name):
-    p_key= serialization.load_pem_private_key(
-    base64.b64decode(os.getenv('SNOW_PK')),
-    password=os.getenv('SNOW_PK_PASSPHRASE').encode('ascii'),
-    backend=default_backend()
-    )
+# load the configuration
+try:
+    config = utils.load_and_parse_config()
+except FileNotFoundError:
+    print("Config file not found. Please ensure 'spelbook_config.yaml' exists.")
+    config = None
 
-    pkb = p_key.private_bytes(
-    encoding=serialization.Encoding.DER,
-    format=serialization.PrivateFormat.PKCS8,
-    encryption_algorithm=serialization.NoEncryption())
 
-    # Key value pairs of various snowflake databases
-    dbs = {'snow_s':'staging_db',
-        'snow_a':'analytics_db',
-        'snow_f':'fivetran_database'}
-    # Create a credentials dictionary
-    creds = {
-    'account': os.getenv('SNOWFLAKE_URL'),
-    'user': os.getenv('SNOWFLAKE_USER'),
-    'role': os.getenv('SNOWFLAKE_ROLE'),
-    "private_key": pkb,
-    'warehouse': 'COMPUTE_WH',
-    'database': dbs[db_name]
-    }
-    return creds
+def get_db_config(db_name):
+    for db in config['databases']:
+        if db['name'] == db_name:
+            return db
+    raise ValueError(f"Database configuration for '{db_name}' not found.")
+
 
 def snowflake_connect(db_name):
-    # Get the credentials dictionary
-    creds = get_sf_creds(db_name)
+    """
+    Create a Snowflake connection using credentials from the config file or environment variables.
+    :param db_name: The name of the database as defined in the config file.
+    :return: Snowpark session object.
+    """
+    db_config = get_db_config(db_name)  # Fetch database config from the config file
+
+    # Determine authentication method
+    use_private_key = db_config.get('private_key') or os.getenv('SNOW_PK')
+
     try:
-        # Establish the connection
-        session = Session.builder.configs(creds).create()
-        print("session created")
+        if use_private_key:
+            # Private key authentication
+            private_key = db_config.get('private_key')
+            passphrase = db_config.get('private_key_passphrase')
+
+            # Decode and load the private key
+            p_key = serialization.load_pem_private_key(
+                base64.b64decode(private_key),
+                password=passphrase.encode('ascii') if passphrase else None,
+                backend=default_backend()
+            )
+            pkb = p_key.private_bytes(
+                encoding=serialization.Encoding.DER,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption()
+            )
+
+            session = Session.builder.configs({
+                'account': db_config['account'],
+                'user': db_config['user'],
+                'private_key': pkb,
+                'role': db_config['role'],
+                'warehouse': db_config['warehouse'],
+                'database': db_config['database'],
+                'schema': db_config.get('schema', 'public')
+            }).create()
+        else:
+            # Username/password authentication
+            session = Session.builder.configs({
+                'account': db_config['account'],
+                'user': db_config['user'],
+                'password': db_config.get('password'),
+                'role': db_config['role'],
+                'warehouse': db_config['warehouse'],
+                'database': db_config['database'],
+                'schema': db_config.get('schema', 'public')
+            }).create()
+
+        return session
     except Exception as e:
-        # Handle error
-        print('An error was encountered creating the snowflake connection, ', e)        
-    return session
+        print(f"An error occurred creating the Snowflake session: {e}")
+        return None
+
 
 def mysql_connect(db_name):
-    # Key value pairs of various mysql databases
-    hosts = {'fs_us': os.getenv('FS_US_URL'), 
-             'fs_ca': os.getenv('FS_CA_URL')}
-    dbs = {'fs_us':os.getenv('FS_US_DB'),
-           'fs_ca':os.getenv('FS_CA_DB')}
-    host=hosts[db_name]
-    user=os.getenv('DB_USER')
-    password=os.getenv('MYSQL_PASSWORD')
-    database=dbs[db_name]
-    # Create the connection string and engine sqlalchemy object
-    connection_string = 'mysql+mysqlconnector://{user}:{password}@{host}:3306/{database}'.format(host=host, user=user, password=password,database=database)
-    engine = create_engine(connection_string)
-    # Establish the connection
+    db_config = get_db_config(db_name)
     try:
-        con=engine.connect()
+        connection_string = (
+            f"mysql+mysqlconnector://{db_config['user']}:{db_config['password']}"
+            f"@{db_config['host']}:{db_config.get('port', 3306)}/{db_config['database']}"
+        )
+        engine = create_engine(connection_string)
+        con = engine.connect()
+        return con
     except Exception as e:
-        print('An error was encountered creating the mysql connection, ', e)
-    return con
+        print(f"An error occurred creating the MySQL connection: {e}")
+        return None
+
 
 def get_wizard():
     # Randomly source a wizard file
-    random_file=random.choice(os.listdir('wizards'))
+    random_file = random.choice(os.listdir('wizards'))
     try:
         # Open the file
         wizard = open('./wizards/{filen}'.format(filen=random_file)).read()
     except Exception as e:
         # Handle errors
         print('an error was encountered loading the wizard, ', e)
-    return(wizard)
+    return (wizard)
+
 
 def read_mysql(db_name, query):
-    # Create a blank dataframe to be overwritten
-    df_extract = pd.DataFrame()
+    """
+    Read data from a MySQL database into a Pandas DataFrame.
+    :param db_name: Name of the database as defined in the config file.
+    :param query: SQL query to execute.
+    :return:
+    """
+    con = mysql_connect(db_name)
+    if con is None:
+        return pd.DataFrame()
     try:
-        # Establish the connection and get the dataframe
-        con = mysql_connect(db_name)
-        df_extract = pd.read_sql(query,con=con)
+        df = pd.read_sql(query, con)
+        df.columns = df.columns.str.lower()
+        return df
     except Exception as e:
-        # Handle errors
-        print('An error was encountered reading mysql, ', e)
+        print(f"An error occurred reading from MySQL: {e}")
+        return pd.DataFrame()
     finally:
-        # Close the connection
         con.close()
-    # Cast all columns to lowercase
-    df_extract.columns= df_extract.columns.str.lower()
-    return df_extract
+
 
 def execute_mysql(query, dbname):
+    """
+    Execute a query on a MySQL database.
+    :param query: SQL query to execute.
+    :param dbname: Database name as defined in the config file.
+    :return:
+    """
     try:
         # Establish a connection and run the query
         con = mysql_connect(dbname)
@@ -115,69 +148,131 @@ def execute_mysql(query, dbname):
     finally:
         con.close()
 
-def execute_snowflake(query):
-    try:
-        # Establish a connection and run the query
-        session = snowflake_connect('snow_s')
-        res = session.sql(query)
-        print(get_wizard())
-    except Exception as e:
-        # Handle errors
-        print('An error was encountered executing in snowflake, ', e)
-    finally:
-        # Close the connection
-        session.close()
 
-def read_snowflake(db_name, script):
-    # Create a blank dataframe to be overwritten
-    df_extract = pd.DataFrame()
+def execute_snowflake(query, db_name):
+    """
+    Execute a query on Snowflake using Snowpark.
+    :param query: SQL query to execute.
+    :param db_name: Database name as defined in the config file.
+    """
     try:
-        # Establish a connection and read the data
+        # Establish session
         session = snowflake_connect(db_name)
-        df_extract = session.sql(script).to_pandas()
+        if not session:
+            print("Failed to connect to Snowflake.")
+            return
+
+        # Execute query
+        session.sql(query).collect()
+        print("Query executed successfully.")
+
     except Exception as e:
-        # Handle errors
-        print('An error was encountered reading snowflake, ', e)
+        print(f"An error occurred executing in Snowflake: {e}")
+
     finally:
-        # Close the connection
-        session.close()        
-    df_extract.columns = [x.lower() for x in df_extract.columns]
-    return df_extract
+        if session:
+            session.close()
 
-def write_data(db_name, schema, df, tname):
-    # Check if we are trying to write to staging
-    if db_name !='snow_s':
-        print('your can only write to the staging db')
-    else:
-        try:
-            # Write the data
-            session = Session.builder.configs(get_sf_creds(db_name)).create()
-            print(get_wizard())
-            snowparkDf=session.write_pandas(df=df, schema=schema, table_name=tname, auto_create_table=True, overwrite=True, 
-                                        chunk_size=1000, on_error='continue', quote_identifiers=False)
-        except Exception as e:
-            # Handle errors
-            print('An error was encountered writing to snowflake, ', e)
 
-def get_data(db_name, script):
+def read_snowflake(db_name, query):
+    """
+    Fetch data from Snowflake into a Pandas DataFrame using Snowpark.
+    :param db_name: Database name as defined in the config file.
+    :param query: SQL query to fetch data.
+    :return: Pandas DataFrame.
+    """
+    try:
+        # Establish session
+        session = snowflake_connect(db_name)
+        if not session:
+            print("Failed to connect to Snowflake.")
+            return pd.DataFrame()
+
+        # Execute query and fetch data
+        df = session.sql(query).to_pandas()
+        df.columns = df.columns.str.lower()  # Normalize column names
+        return df
+
+    except Exception as e:
+        print(f"An error occurred reading from Snowflake: {e}")
+        return pd.DataFrame()
+
+    finally:
+        if session:
+            session.close()
+
+
+def write_data(db_name, schema, df, table_name, overwrite=True, chunk_size=1000, **kwargs):
+    """
+    Write a Pandas DataFrame to a Snowflake table using Snowpark.
+    :param db_name: Database name as defined in the config file.
+    :param schema: Schema where the table exists.
+    :param df: Pandas DataFrame to write.
+    :param table_name: Table name to write to.
+    :param overwrite: Whether to overwrite the table if it exists.
+    """
+    try:
+        # Establish session
+        session = snowflake_connect(db_name)
+        if not session:
+            print("Failed to connect to Snowflake.")
+            return
+
+        # Write DataFrame to Snowflake
+        session.write_pandas(
+            df=df,
+            schema=schema,
+            table_name=table_name,
+            auto_create_table=True,
+            overwrite=overwrite,
+            quote_identifiers=False,
+            chunk_size=chunk_size,
+            **kwargs
+        )
+        print(f"Data written successfully to {schema}.{table_name}.")
+
+    except Exception as e:
+        print(f"An error occurred writing to Snowflake: {e}")
+
+    finally:
+        if session:
+            session.close()
+
+
+def get_data(db_name, query):
+    """
+    Get data from a database
+    :param db_name:  The name of the database as defined in the config file.
+    :param query: SQL query to execute.
+    :return: Returns a pandas dataframe
+    """
+    db_config = get_db_config(db_name)
     # Call the correct database read function
-    if db_name in ['snow_a', 'snow_f', 'snow_s']:
-        df = read_snowflake(db_name, script)
+    if db_config['type'] == 'snowflake':
         print(get_wizard())
-    elif db_name in ['fs_us','fs_ca']:
-        df = read_mysql(db_name, script)
+        df = read_snowflake(db_name, query)
+    elif db_config['type'] == 'mysql':
         print(get_wizard())
+        df = read_mysql(db_name, query)
     else:
-        print('Valid database names are, fs_us, fs_ca, snow_a, snow_f and snow_s')
+        print('Valid database types are, snowflake and mysql')
     return df
 
-def run_sql(db_name, script):
+
+def run_sql(db_name, query):
+    """
+    Run a SQL query on a database
+    :param db_name:  The name of the database as defined in the config file.
+    :param query:  SQL query to execute.
+    :return: None
+    """
+    db_config = get_db_config(db_name)
     # Call the correct database run function
-    if db_name in ['snow_a', 'snow_f', 'snow_s']:
-        execute_snowflake(db_name, script)
+    if db_config['type'] == 'snowflake':
         print(get_wizard())
-    elif db_name in ['fs_us','fs_ca']:
-        execute_mysql(db_name, script)
+        execute_snowflake(db_name, query)
+    elif db_config['type'] == 'mysql':
         print(get_wizard())
-    else: 
-        print('Valid database names are, fs_us, fs_ca, snow_a, snow_f and snow_s')
+        execute_mysql(db_name, query)
+    else:
+        print('Valid database types are, snowflake and mysql')
