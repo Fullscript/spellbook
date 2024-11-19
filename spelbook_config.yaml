@@ -1,0 +1,23 @@
+databases:
+  # Snowflake Database Connection
+  - name: alias_of_your_connection
+    type: snowflake
+    account: your_account
+    user: snowflake_user_name # Optional for private key auth
+    password: snowflake_password # Optional, used if private key is not present
+    private_key: snowflake_pk # Base64-encoded private key
+    private_key_passphrase: snowflake_pk_phrase # Optional
+    role: snowflake_role
+    warehouse: snowflake_warehouse
+    database: snowflake_database
+    schema: snowflake_schema
+
+  # MySQL Database Connection
+  - name: alias_of_your_connection
+    type: mysql
+    host: your_host
+    port: 3306
+    user: mysql_user_name
+    password: mysql_password
+    database: mysql_database
+
