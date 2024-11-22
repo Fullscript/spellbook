@@ -5,7 +5,7 @@ setup(
     version='2.1',    
     description='A simple package to make your life easier.',
     url='https://git.fullscript.io/data/spellbook',
-    author='Thomas Edwards, Gui Chagas, David King, Meinhard Mare',
+    author='Thomas Edwards, Gui Chagas, David King, Meinhard Mare, Karsten Melchers',
     author_email='thomas.edwards@fullscript.com',
     license='MIT License',
     packages=['spellbook'],
