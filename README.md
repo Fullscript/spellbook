@@ -26,10 +26,13 @@ Spellbook is built to simplify your workflows and supercharge your data explorat
 - Manage Google Drive
 - Perform statistical analyses
 
+For feature methods and examples, please refer to the [Wiki Page](https://git.fullscript.io/data/spellbook/-/wikis/home).
+
 
 ## Installation
 
 Spellbook requires Python 3.11 or higher. Use the following steps to install:
+> Note: At the time relase, Snowpark does not support versions of Python higher than 3.11
 
 1. Pip install:
 
