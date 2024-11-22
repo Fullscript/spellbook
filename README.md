@@ -1,10 +1,11 @@
 # Spellbook
 
-Spellbook is the ultimate tool to power ad-hoc analyses and support all your data and analytics needs at Fullscript. 
-Designed with flexibility and functionality in mind, it’s a one-stop library for data scientists and developers.
+Helping data scientists and engineers save time by making it simple to connect to databases, work with spreadsheets, 
+manage files, and run analyses. With Spellbook, they can focus on finding insights and solving problems instead of 
+dealing with complicated tools.
 
 With Spellbook, you can:
-* Seamlessly connect to multiple databases, including Snowflake and MySQL, for secure querying and effortless data retrieval.
+* Seamlessly connect to Snowflake and MySQL databases, for secure querying and effortless data retrieval.
 * Work with Google Sheets, making it easy to read, write, and update spreadsheets.
 * Manage Google Drive, creating folders and saving files with ease. 
 * Perform statistical analyses, helping you run A/B tests and extract actionable insights.
@@ -42,7 +43,7 @@ pip install spellbookfs
 
 ## Configuration
 Effortlessly and securely manage your connections and configurations! Simply add database types and connection 
-credentials to your [spelbook_config.yaml](spellbook_config.yaml) file, or include your Google service account details for seamless access to 
+credentials to your [spellbook_config.yaml](spellbook_config.yaml) file, or include your Google service account details for seamless access to 
 Google services. For added security, Spellbook supports storing credentials in environment variables 
 or in a configuration file that references those variables, keeping your sensitive information safe and sound.
 
