@@ -6,33 +6,33 @@ import pandas as pd
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 import base64
-import utils
+from spellbook.utils import load_and_parse_config
 
 # Needs a very specific pip install
 # pip install "snowflake-connector-python[pandas]"
 
-# load the configuration
-try:
-    config = utils.load_and_parse_config()
-except FileNotFoundError:
-    print("Config file not found. Please ensure 'spelbook_config.yaml' exists.")
-    config = None
-
 
 def get_db_config(db_name):
+    # load the configuration
+    try:
+        config = load_and_parse_config(configurations='databases')
+    except FileNotFoundError:
+        print("Config file not found. Please ensure 'spellbook_config.yaml' exists.")
+        config = None
+
     for db in config['databases']:
         if db['name'] == db_name:
             return db
     raise ValueError(f"Database configuration for '{db_name}' not found.")
 
 
-def snowflake_connect(db_name):
+def snowflake_connect(db_name, **kwargs):
     """
     Create a Snowflake connection using credentials from the config file or environment variables.
     :param db_name: The name of the database as defined in the config file.
     :return: Snowpark session object.
     """
-    db_config = get_db_config(db_name)  # Fetch database config from the config file
+    db_config = get_db_config(db_name, **kwargs)  # Fetch database config from the config file
 
     # Determine authentication method
     use_private_key = db_config.get('private_key') or os.getenv('SNOW_PK')
@@ -82,8 +82,8 @@ def snowflake_connect(db_name):
         return None
 
 
-def mysql_connect(db_name):
-    db_config = get_db_config(db_name)
+def mysql_connect(db_name, **kwargs):
+    db_config = get_db_config(db_name, **kwargs)
     try:
         connection_string = (
             f"mysql+mysqlconnector://{db_config['user']}:{db_config['password']}"
@@ -239,14 +239,14 @@ def write_data(db_name, schema, df, table_name, overwrite=True, chunk_size=1000,
             session.close()
 
 
-def get_data(db_name, query):
+def get_data(db_name, query, **kwargs):
     """
     Get data from a database
     :param db_name:  The name of the database as defined in the config file.
     :param query: SQL query to execute.
     :return: Returns a pandas dataframe
     """
-    db_config = get_db_config(db_name)
+    db_config = get_db_config(db_name, **kwargs)
     # Call the correct database read function
     if db_config['type'] == 'snowflake':
         print(get_wizard())
@@ -259,14 +259,14 @@ def get_data(db_name, query):
     return df
 
 
-def run_sql(db_name, query):
+def run_sql(db_name, query, **kwargs):
     """
     Run a SQL query on a database
     :param db_name:  The name of the database as defined in the config file.
     :param query:  SQL query to execute.
     :return: None
     """
-    db_config = get_db_config(db_name)
+    db_config = get_db_config(db_name, **kwargs)
     # Call the correct database run function
     if db_config['type'] == 'snowflake':
         print(get_wizard())

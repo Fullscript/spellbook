@@ -1,0 +1,43 @@
+databases:
+  # Snowflake Database Connection
+  - name: alias_of_your_connection
+    type: snowflake
+    account: your_account
+    user: snowflake_user_name # Optional for private key auth
+    password: snowflake_password # Optional, used if private key is not present
+    private_key: snowflake_pk # Base64-encoded private key
+    private_key_passphrase: snowflake_pk_phrase # Optional
+    role: snowflake_role
+    warehouse: snowflake_warehouse
+    database: snowflake_database
+    schema: snowflake_schema
+
+  - name: alias_of_your_connection_2
+    type: snowflake
+    account: ${SNOWFLAKE_ACCOUNT}
+    user: ${SNOWFLAKE_USER} # Example of using environment variables
+    password: ${SNOWFLAKE_PASSWORD} # Example of using environment variables
+    private_key: snowflake_pk  # Example of using environment variables
+    private_key_passphrase: snowflake_pk_phrase # Optional
+    role: snowflake_role
+    warehouse: snowflake_warehouse
+    database: snowflake_database
+    schema: snowflake_schema
+
+  # MySQL Database Connection
+  - name: alias_of_your_connection
+    type: mysql
+    host: your_host
+    port: 3306
+    user: mysql_user_name
+    password: mysql_password
+    database: mysql_database
+
+google_accounts:
+  # Google Sheets Service Account 1
+  - name: google_sheets_service_account_1
+    service_account: "your_base64_encoded_service_account_credentials_here"  # Add your Base64-encoded service account JSON here
+  # Google Sheets Service Account 2
+  - name: google_sheets_service_account_2
+    service_account: "your_base64_encoded_service_account_credentials_here"
+

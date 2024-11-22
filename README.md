@@ -42,7 +42,7 @@ pip install spellbookfs
 
 ## Configuration
 Effortlessly and securely manage your connections and configurations! Simply add database types and connection 
-credentials to your [spelbook_config.yaml](spelbook_config.yaml) file, or include your Google service account details for seamless access to 
+credentials to your [spelbook_config.yaml](spellbook_config.yaml) file, or include your Google service account details for seamless access to 
 Google services. For added security, Spellbook supports storing credentials in environment variables 
 or in a configuration file that references those variables, keeping your sensitive information safe and sound.
 
