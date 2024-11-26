@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(
     name='Spellbook',
@@ -8,11 +8,12 @@ setup(
     author='Thomas Edwards, Gui Chagas, David King, Meinhard Mare, Karsten Melchers',
     author_email='thomas.edwards@fullscript.com',
     license='MIT License',
-    packages=['spellbook'],
+    packages=find_packages(exclude=['test']),
     install_requires=[
         'appnope==0.1.4',
         'asn1crypto==1.5.1',
         'asttokens==2.4.1',
+        'snowflake-sqlalchemy==1.7.0',
         'certifi==2024.8.30',
         'cffi==1.17.1',
         'charset-normalizer==3.4.0',
