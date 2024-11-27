@@ -7,6 +7,8 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 import base64
 from spellbook.utils import load_and_parse_config
+import pkgutil
+
 
 # Needs a very specific pip install
 # pip install "snowflake-connector-python[pandas]"
@@ -99,10 +101,13 @@ def mysql_connect(db_name, **kwargs):
 
 def get_wizard():
     # Randomly source a wizard file
-    random_file = random.choice(os.listdir('wizards'))
+    # random_file = random.choice(os.listdir('wizards'))
+    random_file = 'wizard1.txt'
     try:
         # Open the file
-        wizard = open('./wizards/{filen}'.format(filen=random_file)).read()
+        wizard = pkgutil.get_data('wizards', '{filen}'.format(filen=random_file))
+
+        # wizard = open('./wizards/{filen}'.format(filen=random_file)).read()
     except Exception as e:
         # Handle errors
         print('an error was encountered loading the wizard, ', e)
