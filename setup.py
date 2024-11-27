@@ -8,7 +8,6 @@ setup(
     author='Thomas Edwards, Gui Chagas, David King, Meinhard Mare, Karsten Melchers',
     author_email='thomas.edwards@fullscript.com',
     license='MIT License',
-    packages=find_packages(exclude=['test']),
     install_requires=[
         'appnope==0.1.4',
         'asn1crypto==1.5.1',
@@ -126,4 +125,8 @@ setup(
         'Operating System :: All',
         'Programming Language :: Python :: 3.11',
     ],
+    packages=find_packages(where="spellbook"),
+    package_dir={"": "spellbook"},
+    package_data={'wizards': ['*.txt']},
+    include_package_data=True,
 )
