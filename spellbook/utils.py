@@ -1,6 +1,7 @@
 import os
 import yaml
 import re
+import warnings
 
 
 def load_config(file_path):
@@ -21,14 +22,24 @@ def parse_env_variables(config, configurations):
     :param config: The configuration dictionary
     :return:  config variable
     """
+    sensitive_keys = {'account', 'user', 'password', 'private_key', 'private_key_passphrase', 'host'}
     pattern = re.compile(r'\$\{(\w+)\}')
+
     for block in config[configurations]:
         for key, value in block.items():
             if isinstance(value, str):
                 matches = pattern.findall(value)
-                for match in matches:
-                    env_value = os.getenv(match, '')
-                    block[key] = block[key].replace(f'${{{match}}}', env_value)
+                if not matches:  # If the value is not referencing an environment variable
+                    if key in sensitive_keys:
+                        warnings.warn(
+                            f"The key '{key}' is hardcoded in the configuration file. "
+                            "It is recommended to use environment variables for sensitive information."
+                        )
+                else:
+                    # Replace environment variable placeholders with their values
+                    for match in matches:
+                        env_value = os.getenv(match, '')
+                        block[key] = block[key].replace(f'${{{match}}}', env_value)
     return config
 
 
