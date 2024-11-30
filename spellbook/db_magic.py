@@ -100,18 +100,21 @@ def mysql_connect(db_name, **kwargs):
 
 
 def get_wizard():
-    # Randomly source a wizard file
-    # random_file = random.choice(os.listdir('wizards'))
+    # Specify the file to read
     random_file = 'wizard1.txt'
     try:
-        # Open the file
-        wizard = pkgutil.get_data('wizards', '{filen}'.format(filen=random_file))
-
-        # wizard = open('./wizards/{filen}'.format(filen=random_file)).read()
+        wizard = pkgutil.get_data('spellbook.wizards', random_file)
+        if wizard is not None:
+            # Decode binary data to a string
+            wizard = wizard.decode('utf-8')
+        else:
+            raise FileNotFoundError(f"The file '{random_file}' was not found.")
     except Exception as e:
         # Handle errors
-        print('an error was encountered loading the wizard, ', e)
-    return (wizard)
+        print('An error was encountered loading the wizard:', e)
+        wizard = None
+    return wizard
+
 
 
 def read_mysql(db_name, query):
