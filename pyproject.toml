@@ -134,8 +134,8 @@ statsmagic = [
 ]
 
 [tool.setuptools.packages.find]
-where = ["spellbook"]
-include = ["wizards/*.txt"]
+where = ["."]
+include = ["spellbook"]
 
 [tool.setuptools.package-data]
-"spellbook" = ["../wizards/*.txt"]
+"spellbook" = ["wizards/*.txt"]
