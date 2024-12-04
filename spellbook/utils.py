@@ -61,10 +61,8 @@ def get_wizard():
         # Get a reference to the 'wizards' directory
         wizards_dir = importlib.resources.files('spellbook.wizards')
 
-        # Convert the directory reference to a context-managed path
-        with importlib.resources.as_file(wizards_dir) as wizards_path:
-            # Get all text files in the directory
-            wizard_files = [f.name for f in wizards_path.iterdir() if f.is_file() and f.name.endswith('.txt')]
+        # List all text files in the directory
+        wizard_files = [f.name for f in wizards_dir.iterdir() if f.is_file() and f.name.endswith('.txt')]
 
         # Ensure there are wizard files available
         if not wizard_files:
@@ -77,7 +75,6 @@ def get_wizard():
         with importlib.resources.open_text('spellbook.wizards', random_file) as f:
             wizard = f.read()
 
-        print(f"Loaded wizard file: {random_file}")
     except FileNotFoundError as e:
         print(e)
         wizard = None
