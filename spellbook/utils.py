@@ -86,12 +86,3 @@ def get_wizard():
         wizard = None
 
     return wizard
-
-    except FileNotFoundError as e:
-        print(e)
-        wizard = None
-    except Exception as e:
-        print('An error was encountered loading the wizard:', e)
-        wizard = None
-
-    return wizard
