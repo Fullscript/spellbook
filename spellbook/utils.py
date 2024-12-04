@@ -2,7 +2,8 @@ import os
 import yaml
 import re
 import warnings
-
+import random
+import importlib.resources
 
 def load_config(file_path):
     """
@@ -52,3 +53,31 @@ def load_and_parse_config(config_file_path='spellbook_config.yaml', configuratio
     config = load_config(file_path=config_file_path)
     config = parse_env_variables(config, configurations=configurations)
     return config
+
+# load wizard file from the wizard directory
+def get_wizard():
+    try:
+        # List all files in the 'wizards' directory
+        with importlib.resources.files('spellbook.wizards') as wizards_dir:
+            # Get all text files in the directory
+            wizard_files = [f.name for f in wizards_dir.iterdir() if f.is_file() and f.name.endswith('.txt')]
+
+        # Ensure there are wizard files available
+        if not wizard_files:
+            raise FileNotFoundError("No wizard files found in the directory.")
+
+        # Choose a random file from the list
+        random_file = random.choice(wizard_files)
+
+        # Load the content of the randomly chosen file
+        with importlib.resources.open_text('spellbook.wizards', random_file) as f:
+            wizard = f.read()
+
+    except FileNotFoundError as e:
+        print(e)
+        wizard = None
+    except Exception as e:
+        print('An error was encountered loading the wizard:', e)
+        wizard = None
+
+    return wizard

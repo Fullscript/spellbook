@@ -1,13 +1,11 @@
 import os
 from snowflake.snowpark import Session
 from sqlalchemy import create_engine
-import random
 import pandas as pd
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 import base64
-from spellbook.utils import load_and_parse_config
-import pkgutil
+from spellbook.utils import load_and_parse_config, get_wizard
 
 
 # Needs a very specific pip install
@@ -97,24 +95,6 @@ def mysql_connect(db_name, **kwargs):
     except Exception as e:
         print(f"An error occurred creating the MySQL connection: {e}")
         return None
-
-
-def get_wizard():
-    # Specify the file to read
-    random_file = 'wizard1.txt'
-    try:
-        wizard = pkgutil.get_data('spellbook.wizards', random_file)
-        if wizard is not None:
-            # Decode binary data to a string
-            wizard = wizard.decode('utf-8')
-        else:
-            raise FileNotFoundError(f"The file '{random_file}' was not found.")
-    except Exception as e:
-        # Handle errors
-        print('An error was encountered loading the wizard:', e)
-        wizard = None
-    return wizard
-
 
 
 def read_mysql(db_name, query):
