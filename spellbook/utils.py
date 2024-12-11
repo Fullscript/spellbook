@@ -45,7 +45,8 @@ def parse_env_variables(config, configurations):
 
 
 # Load and parse the configuration
-def load_and_parse_config(config_file_path='spellbook_config.yaml', configurations=None):
+# def load_and_parse_config(config_file_path='spellbook_config.yaml', configurations=None):
+def load_and_parse_config(config_file_path=os.path.expanduser('~')+'/'+'spellbook_config.yaml', configurations=None):
     """
     Load and parse the configuration
     :return: config variable
