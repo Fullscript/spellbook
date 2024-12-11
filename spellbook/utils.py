@@ -51,6 +51,13 @@ def load_and_parse_config(config_file_path=os.path.expanduser('~')+'/'+'spellboo
     Load and parse the configuration
     :return: config variable
     """
+
+    # Use the home folder version but if a local file exists it overwrites the home folder version
+    if os.path.isfile('spellbook_config.yaml'): 
+        config_file_path='spellbook_config.yaml'
+    else: 
+        pass
+
     config = load_config(file_path=config_file_path)
     config = parse_env_variables(config, configurations=configurations)
     return config
