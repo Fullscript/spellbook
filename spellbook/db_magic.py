@@ -137,7 +137,7 @@ def execute_mysql(query, dbname):
         con.close()
 
 
-def execute_snowflake(query, db_name):
+def execute_snowflake(db_name, query):
     """
     Execute a query on Snowflake using Snowpark.
     :param query: SQL query to execute.
