@@ -14,7 +14,6 @@ class GSheetsHandler:
     def __init__(self, gsheet_url, service_account_name):
         self._gsheet_url = gsheet_url
         self._service_account_name = service_account_name
-        self._config_file = os.path.expanduser('~')+'/'+'spellbook_config.yaml'
         if os.path.isfile('spellbook_config.yaml'): 
             self._config_file = 'spellbook_config.yaml'
         else: 
