@@ -18,7 +18,6 @@ class GSheetsHandler:
             self._config_file = 'spellbook_config.yaml'
         else: 
             self._config_file = os.path.expanduser('~')+'/'+'spellbook_config.yaml'
-        config_file_path='spellbook_config.yaml'
         self._df_results = pd.DataFrame()
         self._gc = None
         self._sh = None
