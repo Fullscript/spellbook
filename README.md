@@ -38,7 +38,7 @@ Spellbook requires Python 3.11 or higher. Use the following steps to install:
 1. Pip install:
 
 ```bash
-pip install spellbookfs
+pip install git+https://git.fullscript.io/data/spellbook.git
 ```
 
 ## Configuration
@@ -46,6 +46,30 @@ Effortlessly and securely manage your connections and configurations! Simply add
 credentials to your [spellbook_config.yaml](spellbook_config.yaml) file, or include your Google service account details for seamless access to 
 Google services. For added security, Spellbook supports storing credentials in environment variables 
 or in a configuration file that references those variables, keeping your sensitive information safe and sound.
+
+You must have a `spellbook_config.yaml` file in your root directory or in your project directory.
+An example of the `spellbook_config.yaml` file is shown below:
+
+```yaml
+databases:
+  # Snowflake Database Connection
+  - name: alias_of_your_connection
+    type: snowflake
+    account: your_account
+    user: snowflake_user_name # Optional for private key auth
+    password: snowflake_password # Optional, used if private key is not present
+    private_key: snowflake_pk # Base64-encoded private key
+    private_key_passphrase: snowflake_pk_phrase # Optional
+    role: snowflake_role
+    warehouse: snowflake_warehouse
+    database: snowflake_database
+    schema: snowflake_schema
+
+google_accounts:
+  # Google Sheets Service Account 1
+  - name: google_sheets_service_account_1
+    service_account: "your_base64_encoded_service_account_credentials_here"  # Add your Base64-encoded service account JSON here
+```
 
 ## Contributing
 
