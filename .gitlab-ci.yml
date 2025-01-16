@@ -1,0 +1,32 @@
+include:
+  - component: $CI_SERVER_FQDN/devops/ci-cd/build-python/template@print-tags
+    inputs:
+      build_python_image_tag: e97a77e41c784cb973785d9b5f88fd1587632491
+  - component: $CI_SERVER_FQDN/devops/ci-cd/publish-python-package/template@initial-impl
+    inputs:
+      public_python_package_image_tag: 87fa387a0fe221b8a630f7c0e78fbbaf6c23e9a1
+  - project: devops/ci-cd/workflow-skip-duplicate-pipelines
+    file: template.yaml
+  - template: Jobs/Secret-Detection.latest.gitlab-ci.yml
+  - template: Jobs/SAST.latest.gitlab-ci.yml
+  - template: Jobs/Dependency-Scanning.latest.gitlab-ci.yml
+
+stages:
+  - test
+  - build
+  - publish
+
+variables:
+  GITLAB_ADVANCED_SAST_ENABLED: 'true'
+  DS_MAJOR_VERSION: 5.7.0
+
+build_spellbook:
+  needs: []
+
+secret_detection:
+  tags:
+    - small
+
+gitlab-advanced-sast:
+  tags:
+    - small
