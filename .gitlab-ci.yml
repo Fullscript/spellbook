@@ -3,12 +3,14 @@ include:
   - component: $CI_SERVER_FQDN/devops/ci-cd/publish-python-package/template@initial-impl
     inputs:
       public_python_package_image_tag: 87fa387a0fe221b8a630f7c0e78fbbaf6c23e9a1
+      artifacts_job_name: build_spellbook
   - component: $CI_SERVER_FQDN/devops/ci-cd/publish-python-package/template@initial-impl
     inputs:
       public_python_package_image_tag: 87fa387a0fe221b8a630f7c0e78fbbaf6c23e9a1
       upload_target: pypi
       pypi_rules_config:
         - when: always
+      artifacts_job_name: build_spellbook
   - project: devops/ci-cd/workflow-skip-duplicate-pipelines
     file: template.yaml
   - template: Jobs/Secret-Detection.latest.gitlab-ci.yml
