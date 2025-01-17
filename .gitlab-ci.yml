@@ -1,7 +1,7 @@
 include:
   - component: $CI_SERVER_FQDN/devops/ci-cd/build-python/template@print-tags
     inputs:
-      build_python_image_tag: 2c2cae7a53c9be291443cdf070d412830547c260
+      build_python_image_tag: 294eeb69ed38c82880bc1eac7f1f424a1ad5ff82
   - component: $CI_SERVER_FQDN/devops/ci-cd/publish-python-package/template@initial-impl
     inputs:
       public_python_package_image_tag: 87fa387a0fe221b8a630f7c0e78fbbaf6c23e9a1
