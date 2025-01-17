@@ -3,6 +3,12 @@ include:
   - component: $CI_SERVER_FQDN/devops/ci-cd/publish-python-package/template@initial-impl
     inputs:
       public_python_package_image_tag: 87fa387a0fe221b8a630f7c0e78fbbaf6c23e9a1
+  - component: $CI_SERVER_FQDN/devops/ci-cd/publish-python-package/template@initial-impl
+    inputs:
+      public_python_package_image_tag: 87fa387a0fe221b8a630f7c0e78fbbaf6c23e9a1
+      upload_target: pypi
+      pypi_rules_config:
+        - when: always
   - project: devops/ci-cd/workflow-skip-duplicate-pipelines
     file: template.yaml
   - template: Jobs/Secret-Detection.latest.gitlab-ci.yml
@@ -28,3 +34,12 @@ secret_detection:
 gitlab-advanced-sast:
   tags:
     - small
+
+gemnasium-python-dependency_scanning:
+  tags:
+    - small
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_COMMIT_BRANCH'
