@@ -1,22 +1,22 @@
 [build-system]
-requires = ["setuptools>=42", "wheel"]
+requires = ["setuptools>=42", "setuptools_scm>=8", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "Spellbook"
-version = "2.1"
+name = "fullscript.spellbook"
+dynamic = ["version"]
 description = "A simple package to make your life easier."
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10, <3.12"
 authors = [
     {name = "Thomas Edwards", email = "thomas.edwards@fullscript.com"},
-    {name = "Gui Chagas"},
-    {name = "David King"},
-    {name = "Meinhard Mare"},
-    {name = "Karsten Melchers"}
+    {name = "Gui Chagas", email = "gui.chagas@fullscript.com"},
+    {name = "David King", email = "david.king@fullscript.com"},
+    {name = "Meinhard Mare", email = "meinhard.mare@fullscript.com"},
+    {name = "Karsten Melchers", email = "karsten.melchers@fullscript.com"}
 ]
-urls = {homepage = "https://git.fullscript.io/data/spellbook"}
+urls = {homepage = "https://github.com/Fullscript/spellbook"}
 dependencies = [
     "appnope==0.1.4",
     "asn1crypto==1.5.1",
@@ -139,3 +139,5 @@ include = ["spellbook"]
 
 [tool.setuptools.package-data]
 "spellbook" = ["wizards/*.txt"]
+
+[tool.setuptools_scm]
