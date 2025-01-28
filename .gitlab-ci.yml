@@ -1,9 +1,9 @@
 include:
   - component: $CI_SERVER_FQDN/devops/ci-cd/build-python/template@0.0.2
-  - component: $CI_SERVER_FQDN/devops/ci-cd/publish-python-package/template@0.1.0
+  - component: $CI_SERVER_FQDN/devops/ci-cd/publish-python-package/template@0.1.1
     inputs:
       artifacts_job_name: build_spellbook
-  - component: $CI_SERVER_FQDN/devops/ci-cd/publish-python-package/template@0.1.0
+  - component: $CI_SERVER_FQDN/devops/ci-cd/publish-python-package/template@0.1.1
     inputs:
       upload_target: pypi
       artifacts_job_name: build_spellbook

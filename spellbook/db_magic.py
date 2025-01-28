@@ -5,7 +5,7 @@ import pandas as pd
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 import base64
-from spellbook.utils import load_and_parse_config, get_wizard
+from spellbook.utils import load_and_parse_config, get_wizard, load_sql_file
 
 
 # Needs a very specific pip install
@@ -108,7 +108,9 @@ def read_mysql(db_name, query):
     if con is None:
         return pd.DataFrame()
     try:
-        df = pd.read_sql(query, con)
+        df = pd.read_sql(
+            load_sql_file(query),
+            con)
         df.columns = df.columns.str.lower()
         return df
     except Exception as e:
@@ -129,7 +131,9 @@ def execute_mysql(query, dbname):
         # Establish a connection and run the query
         con = mysql_connect(dbname)
         mycursor = con.connection.cursor()
-        mycursor.execute(query)
+        mycursor.execute(
+            load_sql_file(query)
+        )
     except Exception as e:
         # Handle errors
         print('An error was encountered executing mysql, ', e)
@@ -151,7 +155,9 @@ def execute_snowflake(db_name, query):
             return
 
         # Execute query
-        session.sql(query).collect()
+        session.sql(
+            load_sql_file(query)
+        ).collect()
         print("Query executed successfully.")
 
     except Exception as e:
@@ -177,7 +183,9 @@ def read_snowflake(db_name, query):
             return pd.DataFrame()
 
         # Execute query and fetch data
-        df = session.sql(query).to_pandas()
+        df = (session.sql(
+                load_sql_file(query)
+        ).to_pandas())
         df.columns = df.columns.str.lower()  # Normalize column names
         return df
 
@@ -238,10 +246,16 @@ def get_data(db_name, query, **kwargs):
     # Call the correct database read function
     if db_config['type'] == 'snowflake':
         print(get_wizard())
-        df = read_snowflake(db_name, query)
+        df = read_snowflake(
+            db_name,
+            load_sql_file(query)
+        )
     elif db_config['type'] == 'mysql':
         print(get_wizard())
-        df = read_mysql(db_name, query)
+        df = read_mysql(
+            db_name,
+            load_sql_file(query)
+        )
     else:
         print('Valid database types are, snowflake and mysql')
     return df
@@ -258,9 +272,15 @@ def run_sql(db_name, query, **kwargs):
     # Call the correct database run function
     if db_config['type'] == 'snowflake':
         print(get_wizard())
-        execute_snowflake(db_name, query)
+        execute_snowflake(
+            db_name,
+            load_sql_file(query)
+        )
     elif db_config['type'] == 'mysql':
         print(get_wizard())
-        execute_mysql(db_name, query)
+        execute_mysql(
+            db_name,
+            load_sql_file(query)
+        )
     else:
         print('Valid database types are, snowflake and mysql')

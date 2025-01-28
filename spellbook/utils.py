@@ -91,3 +91,33 @@ def get_wizard():
         wizard = None
 
     return wizard
+
+
+def load_sql_file(query_file):
+    """
+    Load the contents of a SQL file or return the SQL string directly.
+
+    :param query_file: str, path to the SQL file or raw SQL query string
+    :return: str, SQL query
+    :raises ValueError: if the file path is invalid or not a .sql file
+    """
+    if isinstance(query_file, str) and os.path.exists(query_file):
+        # Ensure it's a .sql file
+        if not query_file.lower().endswith('.sql'):
+            raise ValueError(f"The file {query_file} is not a valid SQL file.")
+
+        # Use a context manager to read the file safely
+        try:
+            with open(query_file, 'r', encoding='utf-8') as file:
+                query_str = file.read()
+        except Exception as e:
+            raise ValueError(f"Error reading the file {query_file}: {e}")
+    else:
+        # Assume it's a raw SQL query string
+        query_str = query_file
+
+    # Check for empty SQL content
+    if not query_str.strip():
+        raise ValueError("The SQL query is empty. Please provide valid SQL content.")
+
+    return query_str
