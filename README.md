@@ -17,6 +17,7 @@ Spellbook is built to simplify your workflows and supercharge your data explorat
 - [Features](#features)
 - [Installation](#installation)
 - [Configuration](#configuration)
+- [Documentation](#documentation)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -70,6 +71,14 @@ google_accounts:
   - name: google_sheets_service_account_1
     service_account: "your_base64_encoded_service_account_credentials_here"  # Add your Base64-encoded service account JSON here
 ```
+
+## Documentation
+For detailed documentation on how to use Spellbook, please refer to the [Documentation](documentation) folder in the repository.  
+**Functionality:**
+- [Database Magic](documentation/db_magic.md)
+- [Drive Magic](documentation/drive_magic.md)
+- [Sheet Magic](documentation/sheet_magic.md)
+- [Stat Magic](documentation/stat_magic.md)
 
 ## Contributing
 
