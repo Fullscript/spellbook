@@ -183,7 +183,7 @@ six==1.16.0
     #   asttokens
     #   fullscript.spellbook (pyproject.toml)
     #   python-dateutil
-snowflake-connector-python==3.12.3
+snowflake-connector-python==3.15.0
     # via
     #   fullscript.spellbook (pyproject.toml)
     #   snowflake-snowpark-python
