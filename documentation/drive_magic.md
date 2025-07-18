@@ -27,7 +27,7 @@ Step-by-step:
 
   4 - From the same page, download the client secret as a JSON file.
 
-  5 - Now the process is similar to what is done for `'GS_SERVICE_ACCOUNT'`. Copy the contents of the JSON file.
+  5 - Now the process is similar to what is done for `'GS_SERVICE_ACCOUNT_KEY'`. Copy the contents of the JSON file.
 
   6 - Go to the terminal and use `pbpaste | base64 | pbcopy` to paste, encode, and copy the contents again.
 
