@@ -37,21 +37,21 @@ class GSheetsHandler:
         try:
             # Load the configuration
             config = load_and_parse_config(config_file_path=self._config_file, configurations='google_accounts')
-            gs_service_account = None
+            GS_SERVICE_ACCOUNT_KEY = None
 
             # Find the Google Sheets service account details in the configuration
             google_accounts = config.get('google_accounts', [])
             for gs_account in google_accounts:
                 if gs_account.get('name') == self._service_account_name:
-                    gs_service_account = gs_account.get('service_account')
+                    GS_SERVICE_ACCOUNT_KEY = gs_account.get('service_account')
                     break
 
-            if not gs_service_account:
+            if not GS_SERVICE_ACCOUNT_KEY:
                 raise ValueError(f"Google Sheets service account '{self._service_account_name}' not found in configuration file.")
 
             # Decode and write credentials from configuration to a temporary file
             with open("credentials.json", "w") as credential_file:
-                print(base64.b64decode(gs_service_account).decode(), file=credential_file)
+                print(base64.b64decode(GS_SERVICE_ACCOUNT_KEY).decode(), file=credential_file)
 
             # Use the JSON file to authenticate on Google Sheets
             self._gc = pygsheets.authorize(service_file="credentials.json")

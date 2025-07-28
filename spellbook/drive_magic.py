@@ -50,22 +50,22 @@ def get_service(scopes, service_account_name, auth_type='service_account', **kwa
 
             # Load the configuration
             config = load_and_parse_config(configurations='google_accounts', **kwargs)
-            gs_service_account = None
+            GS_SERVICE_ACCOUNT_KEY = None
 
             # Find the Google Sheets service account details in the configuration
             google_accounts = config.get('google_accounts', [])
             for gs_account in google_accounts:
                 if gs_account.get('name') == service_account_name:
-                    gs_service_account = gs_account.get('service_account')
+                    GS_SERVICE_ACCOUNT_KEY = gs_account.get('service_account')
                     break
 
-            if not gs_service_account:
+            if not GS_SERVICE_ACCOUNT_KEY:
                 raise ValueError(
                     f"Google Sheets service account '{service_account_name}' not found in configuration file.")
 
-            # creates a credentials file using the info in the env var GS_SERVICE_ACCOUNT
+            # creates a credentials file using the info in the env var GS_SERVICE_ACCOUNT_KEY
             with open('credentials.json', 'w') as credential_file:
-                print(base64.b64decode(os.environ['GS_SERVICE_ACCOUNT']).decode(), file=credential_file)
+                print(base64.b64decode(os.environ['GS_SERVICE_ACCOUNT_KEY']).decode(), file=credential_file)
 
             # uses the file to create the scoped credentials
             credentials = service_account.Credentials.from_service_account_file('credentials.json')

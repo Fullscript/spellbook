@@ -18,8 +18,8 @@
 ## Create a Google Service account
 To use this feature, you must create a Google service account. Instructions on how to do this are available on the Google [IAM documentation](https://cloud.google.com/iam/docs/service-accounts-create#iam-service-accounts-create-console)
 
-## Saving Your `GS_SERVICE_ACCOUNT` Environment Variable
-How to save your 'GS_SERVICE_ACCOUNT' env-var to use this code
+## Saving Your `GS_SERVICE_ACCOUNT_KEY` Environment Variable
+How to save your 'GS_SERVICE_ACCOUNT_KEY' env-var to use this code
 
 To use Google Service Account functionality with this code, you need to save your Google Service Account JSON as an encrypted string in an environment variable. Follow these steps:
 1.Convert the JSON File Content to a Base64-Encoded String
@@ -32,11 +32,11 @@ To use Google Service Account functionality with this code, you need to save you
  
 2.Save the Encoded String as an Environment Variable
   * Add the encoded string as an environment variable.
-  * Use a name like GS_SERVICE_ACCOUNT for consistency.
+  * Use a name like GS_SERVICE_ACCOUNT_KEY for consistency.
 
 For example, add the following line to your environment file (e.g., .env):
 ```bash
-GS_SERVICE_ACCOUNT=your_base64_encoded_string
+GS_SERVICE_ACCOUNT_KEY=your_base64_encoded_string
 ```
 3.Why Base64 Encoding?
   * Base64 ensures the JSON content is securely represented as a single string, making it compatible with environment variables.
