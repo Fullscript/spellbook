@@ -140,17 +140,23 @@ def list_folder_contents(service, folder_url, max_results=1000, show_trashed=Fal
 
     # get the folder id
     folder_id = folder_url.rsplit('/', 1)[-1]
-
     try:
-        # get items from GDrive
+        # get files from GDrive
+        files = []
+
         results = service.files().list(q=f"'{folder_id}' in parents and trashed = {str(show_trashed).lower()}",
                                        pageSize=max_results, orderBy='name',
                                        includeItemsFromAllDrives=True, supportsAllDrives=True,
-                                       fields="nextPageToken, files(id, name, mimeType, size, parents, modifiedTime)").execute()
-        items = results.get('files', [])
+                                       fields="nextPageToken, files(id, name, mimeType, size, parents, modifiedTime)")
 
+        while results is not None:
+            response = results.execute()
+            files.extend(response.get('files', []))
+            results = service.files().list_next(results, response)
+        
         # returns as a DF
-        df_temp = pd.DataFrame(items)
+        df_temp = pd.DataFrame(files)
+
         df_temp = df_temp.rename({'size': 'size_bytes'}, axis=1)
         return df_temp
     except HttpError as error:
