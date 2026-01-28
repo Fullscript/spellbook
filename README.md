@@ -39,7 +39,7 @@ Spellbook requires Python 3.11 or higher. Use the following steps to install:
 1. Pip install:
 
 ```bash
-pip install git+https://git.fullscript.io/data/spellbook.git
+pip install fullscript.spellbook
 ```
 
 ## Configuration
