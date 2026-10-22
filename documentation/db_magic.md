@@ -10,6 +10,48 @@ A magical wrapper to perform work with databases.
 from spellbook import db_magic
 ```
 
+### Error Handling
+
+Every failure raises an exception. An empty DataFrame always means "the query matched no
+rows" and never "something went wrong", so results can be trusted without extra checks.
+
+```python
+from spellbook import db_magic
+from spellbook.exceptions import SpellbookError, QueryError, DatabaseNotFoundError
+
+try:
+    df = db_magic.get_data('reporting_db', 'select * from users limit 10')
+except DatabaseNotFoundError:
+    ...  # the name is not in spellbook_config.yaml
+except QueryError:
+    ...  # the database rejected the query
+except SpellbookError:
+    ...  # anything Spellbook raises
+```
+
+| Exception | Raised when |
+| --- | --- |
+| `SpellbookError` | Base class for all of the below |
+| `ConfigError` | The config file is missing, malformed, or references an unset `${VAR}` |
+| `DatabaseNotFoundError` | No database in the config matches the requested name |
+| `AuthenticationError` | Credentials could not be obtained or were rejected |
+| `ConnectionFailedError` | The database could not be reached |
+| `QueryError` | The query was rejected or failed while running |
+
+> **Upgrading from 2.x:** these functions used to print a message and return an empty
+> DataFrame or `None` on failure. Code that inspected `df.empty` to detect *errors* now
+> needs a `try`/`except`. Code that used `df.empty` to detect *zero rows* is unaffected.
+
+### Quiet Mode
+
+Spellbook prints a wizard for company on each query. It goes to stderr, never stdout, so it
+cannot contaminate results. Set `SPELLBOOK_QUIET=1` to turn it off - recommended for
+scripts, scheduled jobs and anything driven by an AI agent.
+
+```bash
+export SPELLBOOK_QUIET=1
+```
+
 ### MySQL Authentication
 
 MySQL connections support two authentication methods, chosen per database in `spellbook_config.yaml`.
@@ -159,3 +201,54 @@ db_magic.run_sql("mysql_db", update_query)
 
 print("SQL executed successfully!")
 ```
+
+### Exploring a database
+
+These helpers answer "what is in here?" without hand-writing `information_schema` queries.
+They are useful interactively, and they are what an AI agent needs before it can write a
+sensible query.
+
+##### list_databases()
+
+Lists the databases in your configuration file, with no credentials included.
+
+```python
+db_magic.list_databases()
+#            name     type        database  iam_auth
+# 0  reporting_db    mysql  mysql_database      True
+```
+
+##### list_tables(db_name, pattern=None)
+
+Lists the tables in a database, optionally filtered by a case-insensitive substring.
+
+```python
+db_magic.list_tables("mysql_db")
+db_magic.list_tables("mysql_db", pattern="order")
+```
+
+The pattern is passed as a bound parameter, so `%` and quotes in it are treated as literal
+text rather than changing the query.
+
+##### describe_table(db_name, table)
+
+Returns one row per column, with its type, nullability and default. Raises `QueryError` if
+the table does not exist.
+
+```python
+db_magic.describe_table("mysql_db", "users")
+#   column_name data_type is_nullable column_default
+# 0          id    bigint          NO           None
+# 1        name   varchar         YES           None
+```
+
+##### preview_table(db_name, table, limit=10)
+
+Reads the first few rows of a table.
+
+```python
+db_magic.preview_table("mysql_db", "users", limit=5)
+```
+
+`table` must be a plain identifier - letters, digits, underscores, dots or dollar signs -
+because a table name cannot be passed as a bound parameter.
