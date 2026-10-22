@@ -54,21 +54,31 @@ An example of the `spellbook_config.yaml` file is shown below:
 ```yaml
 databases:
   # Snowflake Database Connection
-  - name: alias_of_your_connection
+  - name: snowflake_example
     type: snowflake
-    account: your_account
-    user: snowflake_user_name # Optional for private key auth
-    password: snowflake_password # Optional, used if private key is not present
-    private_key: snowflake_pk # Base64-encoded private key
-    private_key_passphrase: snowflake_pk_phrase # Optional
+    account: ${SNOWFLAKE_ACCOUNT}
+    user: ${SNOWFLAKE_USER}
+    password: ${SNOWFLAKE_PASSWORD} # Optional when a private key is given
+    private_key: ${SNOW_PK} # Base64-encoded; used in preference to the password
+    private_key_passphrase: ${SNOW_PK_PASSPHRASE} # Optional
     role: snowflake_role
     warehouse: snowflake_warehouse
     database: snowflake_database
-    schema: snowflake_schema
+    schema: snowflake_schema # Optional, defaults to 'public'
+
+  # MySQL Database Connection using a stored password
+  - name: mysql_example
+    type: mysql
+    host: your_host
+    port: 3306
+    user: mysql_user_name
+    password: ${MYSQL_PASSWORD}
+    database: mysql_database
 
   # MySQL Database Connection using AWS RDS IAM authentication (no stored password).
   # Fullscript internal only: requires the `rx` CLI. See documentation/db_magic.md.
-  - name: alias_of_your_connection
+  # No `user` is needed - the IAM token names the user it was issued for.
+  - name: mysql_iam_example
     type: mysql
     host: your_host.rds.amazonaws.com
     port: 3306
