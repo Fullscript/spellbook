@@ -69,13 +69,16 @@ def parse_env_variables(config: dict[str, Any], configurations: str) -> dict[str
     """
     Replace ${VAR} placeholders in a configuration block with environment variable values.
 
-    An unset variable is an error rather than an empty string, because an empty username or
-    host produces a confusing driver-level failure much later on.
+    An unset variable becomes an empty string here rather than an error. The whole section is
+    parsed on every lookup, so refusing to parse would mean an unrelated database you never
+    asked for could stop you connecting to the one you did. Unresolved names are recorded
+    under `_unresolved_env` so that whoever actually uses the block can report them, and so
+    that genuinely optional settings - a Snowflake key with no passphrase, say - still work.
 
     :param config: The configuration dictionary.
     :param configurations: The key of the configuration block to parse.
     :return: The configuration with placeholders substituted.
-    :raises ConfigError: If the block is missing, or a referenced variable is not set.
+    :raises ConfigError: If the section is missing.
     """
     if configurations not in config:
         raise ConfigError(
@@ -85,7 +88,9 @@ def parse_env_variables(config: dict[str, Any], configurations: str) -> dict[str
 
     for block in config[configurations]:
         name = block.get('name', '<unnamed>')
-        for key, value in block.items():
+        unresolved: dict[str, str] = {}
+
+        for key, value in list(block.items()):
             if not isinstance(value, str):
                 continue
 
@@ -102,16 +107,31 @@ def parse_env_variables(config: dict[str, Any], configurations: str) -> dict[str
                 continue
 
             for match in matches:
-                env_value = os.getenv(match)
-                if env_value is None or env_value == '':
-                    raise ConfigError(
-                        f"Environment variable '{match}' is referenced by '{key}' on "
-                        f"'{name}' but is not set. Export it, or replace ${{{match}}} in "
-                        f"{CONFIG_FILENAME} with a literal value."
-                    )
+                env_value = os.getenv(match, '')
+                if env_value == '':
+                    unresolved[key] = match
                 block[key] = block[key].replace(f'${{{match}}}', env_value)
 
+        if unresolved:
+            block['_unresolved_env'] = unresolved
+
     return config
+
+
+def describe_unresolved(name: str, key: str, variable: str) -> str:
+    """
+    Build the error message for a required setting whose environment variable is not set.
+
+    :param name: The name of the database the setting belongs to.
+    :param key: The configuration key that is empty.
+    :param variable: The environment variable that was referenced but not set.
+    :return: The message to raise.
+    """
+    return (
+        f"Environment variable '{variable}' is referenced by '{key}' on '{name}' but is "
+        f"not set. Export it, or replace ${{{variable}}} in {CONFIG_FILENAME} with a "
+        "literal value."
+    )
 
 
 def find_config_file(config_file_path: str | None = None) -> str:

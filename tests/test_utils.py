@@ -38,31 +38,64 @@ def forget_hardcoded_warnings():
     utils._WARNED_HARDCODED.clear()
 
 
-# --- Unresolved environment variables are an error ---------------------------------------
-# Previously ${VAR} for an unset variable became '', which surfaced much later as a
-# confusing driver error, e.g. an empty username being rejected by the server.
+# --- Unresolved environment variables are recorded, not raised ---------------------------
+# Parsing must stay permissive: the whole section is re-parsed on every lookup, so raising
+# here would let an unrelated database stop you connecting to the one you asked for.
+# db_magic.get_db_config turns these records into an error for the database actually used.
 
-def test_unset_environment_variable_raises(monkeypatch, config_file):
-    monkeypatch.delenv('DB_USER', raising=False)
+@pytest.mark.parametrize('unset_value', [None, ''])
+def test_unset_environment_variable_is_recorded_not_raised(
+    monkeypatch, config_file, unset_value,
+):
     monkeypatch.setenv('MYSQL_HOST', 'db.example.com')
+    if unset_value is None:
+        monkeypatch.delenv('DB_USER', raising=False)
+    else:
+        monkeypatch.setenv('DB_USER', unset_value)
     path = config_file(CONFIG)
 
-    with pytest.raises(ConfigError) as error:
-        utils.load_and_parse_config(config_file_path=path, configurations='databases')
+    config = utils.load_and_parse_config(config_file_path=path, configurations='databases')
 
-    message = str(error.value)
+    db = config['databases'][0]
+    assert db['user'] == '', 'the placeholder is substituted away'
+    assert db['_unresolved_env'] == {'user': 'DB_USER'}
+    assert db['host'] == 'db.example.com', 'resolved values are unaffected'
+
+
+def test_blocks_with_everything_set_carry_no_unresolved_record(monkeypatch, config_file):
+    monkeypatch.setenv('MYSQL_HOST', 'db.example.com')
+    monkeypatch.setenv('DB_USER', 'iam_user')
+    path = config_file(CONFIG)
+
+    config = utils.load_and_parse_config(config_file_path=path, configurations='databases')
+
+    assert '_unresolved_env' not in config['databases'][0]
+
+
+def test_an_unrelated_block_does_not_break_parsing(monkeypatch, config_file):
+    """The reported regression: one database's unset variable blocked every other database."""
+    monkeypatch.delenv('SNOW_PK_PASSPHRASE', raising=False)
+    path = config_file({'databases': [
+        {'name': 'snow_s', 'type': 'snowflake',
+         'private_key_passphrase': '${SNOW_PK_PASSPHRASE}'},
+        {'name': 'reporting_db', 'type': 'mysql', 'host': 'db.example.com',
+         'user': 'iam_user', 'database': 'd', 'iam_auth': True},
+    ]})
+
+    config = utils.load_and_parse_config(config_file_path=path, configurations='databases')
+
+    usable = config['databases'][1]
+    assert usable['user'] == 'iam_user'
+    assert '_unresolved_env' not in usable
+
+
+def test_describe_unresolved_names_the_variable_key_and_database():
+    message = utils.describe_unresolved('reporting_db', 'user', 'DB_USER')
+
     assert 'DB_USER' in message
-    assert 'reporting_db' in message, 'the error should name the database involved'
     assert 'user' in message
-
-
-def test_empty_environment_variable_raises(monkeypatch, config_file):
-    monkeypatch.setenv('MYSQL_HOST', 'db.example.com')
-    monkeypatch.setenv('DB_USER', '')
-    path = config_file(CONFIG)
-
-    with pytest.raises(ConfigError, match='DB_USER'):
-        utils.load_and_parse_config(config_file_path=path, configurations='databases')
+    assert 'reporting_db' in message
+    assert utils.CONFIG_FILENAME in message
 
 
 def test_placeholders_are_substituted_when_set(monkeypatch, config_file):

@@ -58,6 +58,15 @@ pattern instead.
 
 ## Traps that have cost time before
 
+**Validate the database being used, not the whole config.** The entire `databases` section
+is re-parsed on every lookup, so any check that runs during parsing applies to databases the
+caller never asked for. Release 3.0.0 raised on the first unset `${VAR}` anywhere in the
+section, which meant an unrelated Snowflake entry with no key passphrase blocked every MySQL
+query. `parse_env_variables` now substitutes permissively and records unresolved names under
+`_unresolved_env`; `db_magic._validate_db_config` turns those into an error for the selected
+database only, and only for settings in `REQUIRED_FIELDS`. Settings that are legitimately
+empty - a Snowflake passphrase, `ssl_ca`, `port`, `schema` - must stay out of that list.
+
 **Config file precedence.** `utils.find_config_file()` prefers `spellbook_config.yaml` in
 the *current working directory* over the one in your home directory. Running anything from
 this repository picks up the placeholder example config, not your real one. If a connection

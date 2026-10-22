@@ -20,7 +20,13 @@ from spellbook.exceptions import (
     DatabaseNotFoundError,
     QueryError,
 )
-from spellbook.utils import load_and_parse_config, load_sql_file, show_wizard
+from spellbook.utils import (
+    CONFIG_FILENAME,
+    describe_unresolved,
+    load_and_parse_config,
+    load_sql_file,
+    show_wizard,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +46,15 @@ _IAM_CURSOR_CLASS = None
 
 SUPPORTED_DB_TYPES = ('snowflake', 'mysql')
 
+# Settings a connection genuinely cannot be made without, checked only for the database
+# being used. Anything absent from here is optional and may resolve to an empty value:
+# `private_key_passphrase`, `schema`, `port`, `ssl_ca` and `rds_db_name` all have defaults
+# or meaningful empty behaviour. MySQL also requires `password` unless `iam_auth` is set.
+REQUIRED_FIELDS = {
+    'mysql': ('host', 'user', 'database'),
+    'snowflake': ('account', 'user', 'role', 'warehouse', 'database'),
+}
+
 
 def _strip_ansi(text_value: str | None) -> str:
     """
@@ -51,13 +66,44 @@ def _strip_ansi(text_value: str | None) -> str:
     return _ANSI_ESCAPE.sub('', text_value or '')
 
 
+def _validate_db_config(db_name: str, db_config: dict[str, Any]) -> dict[str, Any]:
+    """
+    Check that the settings this database cannot work without are actually filled in.
+
+    Only the database being used is checked. Settings that are legitimately optional, such as
+    a Snowflake private key passphrase or an `ssl_ca` bundle, are allowed to stay empty.
+
+    :param db_name: The name of the database, for the error message.
+    :param db_config: The configuration block for that database.
+    :return: The same configuration block.
+    :raises ConfigError: If a required setting is missing or resolved to an empty value.
+    """
+    unresolved = db_config.pop('_unresolved_env', {})
+
+    required = REQUIRED_FIELDS.get(db_config.get('type'), ())
+    if db_config.get('type') == 'mysql' and not db_config.get('iam_auth'):
+        required = required + ('password',)
+
+    for key in required:
+        if db_config.get(key):
+            continue
+        if key in unresolved:
+            raise ConfigError(describe_unresolved(db_name, key, unresolved[key]))
+        raise ConfigError(
+            f"Database '{db_name}' is missing the required '{key}' setting. "
+            f"Add it to {CONFIG_FILENAME}."
+        )
+
+    return db_config
+
+
 def get_db_config(db_name: str) -> dict[str, Any]:
     """
     Look up a single database block from the configuration file.
 
     :param db_name: The name of the database as defined in the config file.
     :return: The configuration for that database.
-    :raises ConfigError: If the configuration file cannot be read.
+    :raises ConfigError: If the config cannot be read, or this database is incomplete.
     :raises DatabaseNotFoundError: If no database matches the given name.
     """
     config = load_and_parse_config(configurations='databases')
@@ -65,7 +111,7 @@ def get_db_config(db_name: str) -> dict[str, Any]:
     databases = config.get('databases') or []
     for db in databases:
         if db.get('name') == db_name:
-            return db
+            return _validate_db_config(db_name, db)
 
     available = ', '.join(sorted(str(db.get('name')) for db in databases)) or '<none>'
     raise DatabaseNotFoundError(
