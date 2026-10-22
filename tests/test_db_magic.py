@@ -346,6 +346,101 @@ def test_missing_required_field_raises_config_error(config):
         db_magic.mysql_connect('legacy_mysql')
 
 
+# --- Required settings are validated per database, not across the whole config -----------
+# Regression: validation ran over every block while parsing, so an unrelated Snowflake
+# entry with an unset ${SNOW_PK_PASSPHRASE} made every MySQL query fail.
+
+@pytest.fixture
+def config_file(tmp_path, monkeypatch):
+    """Write a real config file and make Spellbook load it."""
+    import yaml
+
+    def write(*databases):
+        path = tmp_path / 'spellbook_config.yaml'
+        path.write_text(yaml.safe_dump({'databases': list(databases)}))
+        monkeypatch.setattr(
+            db_magic, 'load_and_parse_config',
+            lambda **kw: __import__('spellbook.utils', fromlist=['x'])
+            .load_and_parse_config(config_file_path=str(path), **kw),
+        )
+    return write
+
+
+def test_an_unrelated_database_does_not_block_the_one_you_asked_for(
+    monkeypatch, config_file,
+):
+    monkeypatch.delenv('SNOW_PK_PASSPHRASE', raising=False)
+    config_file(
+        {'name': 'snow_s', 'type': 'snowflake', 'account': 'a', 'user': 'u', 'role': 'r',
+         'warehouse': 'w', 'database': 'd',
+         'private_key_passphrase': '${SNOW_PK_PASSPHRASE}'},
+        IAM_DB,
+    )
+
+    db = db_magic.get_db_config('reporting_db')
+
+    assert db['user'] == 'iam_user'
+    assert '_unresolved_env' not in db, 'the internal marker must not leak to callers'
+
+
+def test_an_optional_unset_setting_does_not_block_its_own_database(monkeypatch, config_file):
+    """A Snowflake key with no passphrase is a valid setup, so it must not raise."""
+    monkeypatch.delenv('SNOW_PK_PASSPHRASE', raising=False)
+    config_file({
+        'name': 'snow_s', 'type': 'snowflake', 'account': 'a', 'user': 'u', 'role': 'r',
+        'warehouse': 'w', 'database': 'd', 'private_key_passphrase': '${SNOW_PK_PASSPHRASE}',
+    })
+
+    db = db_magic.get_db_config('snow_s')
+
+    assert db['private_key_passphrase'] == ''
+
+
+def test_a_required_setting_with_an_unset_variable_raises_and_names_it(
+    monkeypatch, config_file,
+):
+    monkeypatch.delenv('DB_USER_NOT_SET', raising=False)
+    config_file({
+        'name': 'broken_db', 'type': 'mysql', 'host': 'h',
+        'user': '${DB_USER_NOT_SET}', 'password': 'p', 'database': 'd',
+    })
+
+    with pytest.raises(ConfigError) as error:
+        db_magic.get_db_config('broken_db')
+
+    message = str(error.value)
+    assert 'DB_USER_NOT_SET' in message
+    assert 'broken_db' in message
+    assert 'user' in message
+
+
+@pytest.mark.parametrize('missing', ['host', 'user', 'database'])
+def test_a_missing_required_mysql_setting_raises(config_file, missing):
+    config_file({
+        key: value for key, value in
+        {'name': 'db', 'type': 'mysql', 'host': 'h', 'user': 'u',
+         'password': 'p', 'database': 'd'}.items()
+        if key != missing
+    })
+
+    with pytest.raises(ConfigError, match=f"required '{missing}'"):
+        db_magic.get_db_config('db')
+
+
+def test_password_is_required_without_iam_auth(config_file):
+    config_file({'name': 'db', 'type': 'mysql', 'host': 'h', 'user': 'u', 'database': 'd'})
+
+    with pytest.raises(ConfigError, match="required 'password'"):
+        db_magic.get_db_config('db')
+
+
+def test_password_is_not_required_with_iam_auth(config_file):
+    config_file({'name': 'db', 'type': 'mysql', 'host': 'h', 'user': 'u',
+                 'database': 'd', 'iam_auth': True})
+
+    assert db_magic.get_db_config('db')['iam_auth'] is True
+
+
 def test_every_spellbook_error_shares_one_base_class():
     for error in (
         ConfigError, DatabaseNotFoundError, AuthenticationError,
