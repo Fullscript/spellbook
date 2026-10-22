@@ -66,6 +66,16 @@ databases:
     database: snowflake_database
     schema: snowflake_schema
 
+  # MySQL Database Connection using AWS RDS IAM authentication (no stored password).
+  # Fullscript internal only: requires the `rx` CLI. See documentation/db_magic.md.
+  - name: alias_of_your_connection
+    type: mysql
+    host: your_host.rds.amazonaws.com
+    port: 3306
+    user: ${DB_USER}
+    iam_auth: true
+    database: ${MYSQL_DATABASE}
+
 google_accounts:
   # Google Sheets Service Account 1
   - name: google_sheets_service_account_1

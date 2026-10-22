@@ -1,3 +1,9 @@
 *.whl
 *.egg-info
 *.tar.gz
+__pycache__/
+.pytest_cache/
+.idea/
+venv/
+/.junie/
+.DS_Store
