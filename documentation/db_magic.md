@@ -81,16 +81,18 @@ tokens expire after about 15 minutes:
   type: mysql
   host: ${MYSQL_HOST} # e.g. your-instance.abc123.us-east-1.rds.amazonaws.com
   port: 3306
-  user: ${DB_USER}
   iam_auth: true
   rds_db_name: your_rds_instance_name # Optional, defaults to the value of `name`
   database: ${MYSQL_DATABASE}
 ```
 
+No `user` is needed: the IAM token names the user it was issued for, and Spellbook reads it
+from the token. Set `user` only if you want to pin it, in which case it must match the token.
+
 | Field | Required | Notes |
 | --- | --- | --- |
 | `iam_auth` | No | `true` switches the database to IAM tokens. Omitting it keeps password authentication. |
-| `user` | Yes | Your IAM database user. |
+| `user` | No | Read from the token's `DBUser`. Set it only to pin a specific user; a value that disagrees with the token is reported as a config error. |
 | `rds_db_name` | No | The remote database as named by `rx rds list`. Defaults to `name`, so set it whenever your config alias differs from the RDS name. |
 | `ssl_ca` | No | Not needed in normal use; see below. |
 | `password` | No | Ignored when `iam_auth` is true. |

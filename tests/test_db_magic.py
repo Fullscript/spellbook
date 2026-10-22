@@ -211,6 +211,94 @@ def test_iam_auth_fetches_a_fresh_token_per_connection(monkeypatch, config, engi
     assert 'token-two' in engines[1][0]
 
 
+# --- The IAM token names its own user ----------------------------------------------------
+# An RDS IAM token is a presigned URL carrying DBUser, so `user` need not be configured.
+
+@pytest.mark.parametrize('token, expected', [
+    (FAKE_TOKEN, 'iam_user'),
+    ('host:3306/?Action=connect&DBUser=first.last&X-Amz-Signature=x', 'first.last'),
+    ('host:3306/?DBUser=needs%40escaping', 'needs@escaping'),
+    ('host:3306/?Action=connect&X-Amz-Signature=x', None),   # no DBUser at all
+    ('host:3306/?DBUser=', None),                             # present but empty
+    ('not-a-url-at-all', None),
+    ('', None),
+])
+def test_db_user_is_read_from_the_token(token, expected):
+    assert db_magic.db_user_from_token(token) == expected
+
+
+def test_user_is_derived_from_the_token_when_not_configured(monkeypatch, config, engines):
+    without_user = {key: value for key, value in IAM_DB.items() if key != 'user'}
+    config(without_user)
+    monkeypatch.setattr(subprocess, 'run', fake_rx(stdout=FAKE_TOKEN))
+
+    db_magic.mysql_connect('reporting_db')
+
+    # FAKE_TOKEN carries DBUser=iam_user
+    assert engines[0][0].startswith('mysql+pymysql://iam_user:')
+
+
+def test_a_configured_user_is_still_honoured(monkeypatch, config, engines):
+    config(IAM_DB)
+    monkeypatch.setattr(subprocess, 'run', fake_rx(stdout=FAKE_TOKEN))
+
+    db_magic.mysql_connect('reporting_db')
+
+    assert engines[0][0].startswith('mysql+pymysql://iam_user:')
+
+
+def test_a_user_that_disagrees_with_the_token_is_reported_clearly(
+    monkeypatch, config, engines,
+):
+    """RDS rejects a mismatch with a bare access-denied, so catch it with a real message."""
+    config({**IAM_DB, 'user': 'someone.else'})
+    monkeypatch.setattr(subprocess, 'run', fake_rx(stdout=FAKE_TOKEN))
+
+    with pytest.raises(ConfigError) as error:
+        db_magic.mysql_connect('reporting_db')
+
+    message = str(error.value)
+    assert 'someone.else' in message
+    assert 'iam_user' in message
+    assert engines == [], 'no connection should be attempted'
+
+
+def test_a_token_without_a_user_and_no_config_user_raises(monkeypatch, config, engines):
+    without_user = {key: value for key, value in IAM_DB.items() if key != 'user'}
+    config(without_user)
+    monkeypatch.setattr(subprocess, 'run', fake_rx(
+        stdout='host:3306/?Action=connect&X-Amz-Signature=x',
+    ))
+
+    with pytest.raises(ConfigError, match="did not name one either"):
+        db_magic.mysql_connect('reporting_db')
+
+
+def test_user_is_not_required_in_config_for_iam_databases(config_file):
+    config_file({'name': 'db', 'type': 'mysql', 'host': 'h',
+                 'database': 'd', 'iam_auth': True})
+
+    assert db_magic.get_db_config('db').get('user') is None
+
+
+def test_user_is_still_required_for_password_databases(config_file):
+    config_file({'name': 'db', 'type': 'mysql', 'host': 'h',
+                 'database': 'd', 'password': 'p'})
+
+    with pytest.raises(ConfigError, match="required 'user'"):
+        db_magic.get_db_config('db')
+
+
+@pytest.mark.parametrize('db_config, expected', [
+    ({'type': 'mysql', 'iam_auth': True}, ('host', 'database')),
+    ({'type': 'mysql'}, ('host', 'user', 'database', 'password')),
+    ({'type': 'snowflake'}, ('account', 'user', 'role', 'warehouse', 'database')),
+    ({'type': 'postgres'}, ()),
+])
+def test_required_fields_per_database_type(db_config, expected):
+    assert db_magic.required_fields(db_config) == expected
+
+
 # --- Literal '%' must survive on the pymysql path ----------------------------------------
 # pymysql substitutes whenever args is not None, so the empty parameter set pandas passes
 # would turn `like '%x%'` into a format string. mysql-connector guards on `if params:`,

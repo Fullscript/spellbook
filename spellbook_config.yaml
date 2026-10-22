@@ -1,45 +1,47 @@
 databases:
-  # Snowflake Database Connection
-  - name: alias_of_your_connection
+  # Snowflake connection, with values written straight into this file.
+  # Spellbook warns about hardcoded credentials, so prefer the next example.
+  - name: snowflake_example
     type: snowflake
     account: your_account
-    user: snowflake_user_name # Optional for private key auth
-    password: snowflake_password # Optional, used if private key is not present
-    private_key: snowflake_pk # Base64-encoded private key
-    private_key_passphrase: snowflake_pk_phrase # Optional
+    user: snowflake_user_name
+    password: snowflake_password # Optional when a private key is given
+    private_key: snowflake_pk # Base64-encoded; used in preference to the password
+    private_key_passphrase: snowflake_pk_phrase # Optional, omit if the key has none
     role: snowflake_role
     warehouse: snowflake_warehouse
     database: snowflake_database
-    schema: snowflake_schema
+    schema: snowflake_schema # Optional, defaults to 'public'
 
-  - name: alias_of_your_connection_2
+  # The same connection, reading its sensitive values from environment variables.
+  - name: snowflake_env_example
     type: snowflake
     account: ${SNOWFLAKE_ACCOUNT}
-    user: ${SNOWFLAKE_USER} # Example of using environment variables
-    password: ${SNOWFLAKE_PASSWORD} # Example of using environment variables
-    private_key: snowflake_pk  # Example of using environment variables
-    private_key_passphrase: snowflake_pk_phrase # Optional
+    user: ${SNOWFLAKE_USER}
+    password: ${SNOWFLAKE_PASSWORD}
+    private_key: ${SNOW_PK}
+    private_key_passphrase: ${SNOW_PK_PASSPHRASE} # Optional
     role: snowflake_role
     warehouse: snowflake_warehouse
     database: snowflake_database
     schema: snowflake_schema
 
-  # MySQL Database Connection
-  - name: alias_of_your_connection
+  # MySQL connection using a stored password.
+  - name: mysql_example
     type: mysql
     host: your_host
-    port: 3306
+    port: 3306 # Optional, defaults to 3306
     user: mysql_user_name
-    password: mysql_password
+    password: ${MYSQL_PASSWORD}
     database: mysql_database
 
-  # MySQL Database Connection using AWS RDS IAM authentication.
-  # Requires the `rx` CLI, which is Fullscript internal tooling.
-  - name: alias_of_your_connection_3
+  # MySQL connection using AWS RDS IAM authentication, so no password is stored.
+  # Spellbook fetches a temporary token on every connection, because they expire
+  # after about 15 minutes. Requires the `rx` CLI, which is Fullscript internal tooling.
+  - name: mysql_iam_example
     type: mysql
     host: ${MYSQL_HOST} # e.g. your-instance.abc123.us-east-1.rds.amazonaws.com
     port: 3306
-    user: ${DB_USER} # Your IAM database user
     iam_auth: true # Use an AWS RDS IAM token instead of a password
     rds_db_name: your_rds_instance_name # Optional, as named by `rx rds list`; defaults to `name`
     database: ${MYSQL_DATABASE}
@@ -51,4 +53,3 @@ google_accounts:
   # Google Sheets Service Account 2
   - name: google_sheets_service_account_2
     service_account: "your_base64_encoded_service_account_credentials_here"
-

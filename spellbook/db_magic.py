@@ -4,7 +4,7 @@ import os
 import re
 import subprocess
 from typing import Any
-from urllib.parse import quote_plus
+from urllib.parse import parse_qs, quote_plus
 
 import pandas as pd
 from cryptography.hazmat.backends import default_backend
@@ -49,11 +49,46 @@ SUPPORTED_DB_TYPES = ('snowflake', 'mysql')
 # Settings a connection genuinely cannot be made without, checked only for the database
 # being used. Anything absent from here is optional and may resolve to an empty value:
 # `private_key_passphrase`, `schema`, `port`, `ssl_ca` and `rds_db_name` all have defaults
-# or meaningful empty behaviour. MySQL also requires `password` unless `iam_auth` is set.
+# or meaningful empty behaviour. See required_fields() for the per-database adjustments.
 REQUIRED_FIELDS = {
     'mysql': ('host', 'user', 'database'),
     'snowflake': ('account', 'user', 'role', 'warehouse', 'database'),
 }
+
+
+def required_fields(db_config: dict[str, Any]) -> tuple[str, ...]:
+    """
+    Work out which settings this particular database cannot do without.
+
+    MySQL needs a `password` unless it authenticates with an IAM token, and conversely an
+    IAM database does not need a `user`, because the token says who it was issued to.
+
+    :param db_config: The configuration block for the database.
+    :return: The names of the settings that must be present and non-empty.
+    """
+    fields = REQUIRED_FIELDS.get(db_config.get('type'), ())
+
+    if db_config.get('type') == 'mysql':
+        if db_config.get('iam_auth'):
+            return tuple(field for field in fields if field != 'user')
+        return fields + ('password',)
+
+    return fields
+
+
+def db_user_from_token(token: str) -> str | None:
+    """
+    Read the database user out of an AWS RDS IAM token.
+
+    The token is a presigned URL and carries the user it was issued for as its `DBUser`
+    parameter, so the user does not have to be repeated in the configuration file.
+
+    :param token: The token returned by `rx rds password`.
+    :return: The database user, or None if the token does not name one.
+    """
+    _, _, query = (token or '').partition('?')
+    users = parse_qs(query).get('DBUser') or []
+    return users[0] or None if users else None
 
 
 def _strip_ansi(text_value: str | None) -> str:
@@ -80,11 +115,7 @@ def _validate_db_config(db_name: str, db_config: dict[str, Any]) -> dict[str, An
     """
     unresolved = db_config.pop('_unresolved_env', {})
 
-    required = REQUIRED_FIELDS.get(db_config.get('type'), ())
-    if db_config.get('type') == 'mysql' and not db_config.get('iam_auth'):
-        required = required + ('password',)
-
-    for key in required:
+    for key in required_fields(db_config):
         if db_config.get(key):
             continue
         if key in unresolved:
@@ -270,11 +301,30 @@ def mysql_connect(db_name: str) -> Connection:
         # RDS instance names rarely match the alias used in the config file, so allow an
         # override and fall back to the alias when the two happen to line up.
         token = get_rds_iam_token(db_config.get('rds_db_name', db_config['name']))
+
+        # The token names the user it was issued for, so `user` is optional in the config.
+        token_user = db_user_from_token(token)
+        user = db_config.get('user') or token_user
+        if not user:
+            raise ConfigError(
+                f"Database '{db_name}' has no 'user', and the token from 'rx rds password' "
+                f"did not name one either. Add a 'user' to {CONFIG_FILENAME}."
+            )
+        if token_user and db_config.get('user') and db_config['user'] != token_user:
+            # The token is signed for one user, so connecting as another is rejected by RDS
+            # with a bare access-denied. Say what is actually wrong instead.
+            raise ConfigError(
+                f"Database '{db_name}' is configured for user "
+                f"{db_config['user']!r}, but 'rx rds password' issued a token for "
+                f"{token_user!r}. Remove 'user' from {CONFIG_FILENAME} to use the token's "
+                "own user, or correct it to match."
+            )
+
         # IAM tokens are URL shaped, so they have to be escaped inside the connection
         # string. AWS also requires TLS, and only pymysql completes the token handshake.
         ssl_ca = db_config.get('ssl_ca')
         connection_string = (
-            f"mysql+pymysql://{quote_plus(db_config['user'])}:{quote_plus(token)}"
+            f"mysql+pymysql://{quote_plus(user)}:{quote_plus(token)}"
             f"@{host}:{port}/{database}"
         )
         # A CA bundle gets the certificate verified too; without one we still insist on
