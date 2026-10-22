@@ -10,6 +10,69 @@ A magical wrapper to perform work with databases.
 from spellbook import db_magic
 ```
 
+### MySQL Authentication
+
+MySQL connections support two authentication methods, chosen per database in `spellbook_config.yaml`.
+
+**Password authentication** is the default and needs no changes to an existing config:
+
+```yaml
+- name: legacy_mysql
+  type: mysql
+  host: your_host
+  port: 3306
+  user: mysql_user_name
+  password: ${MYSQL_PASSWORD}
+  database: mysql_database
+```
+
+**AWS RDS IAM authentication** stores no password at all. Add `iam_auth: true` and Spellbook
+calls `rx rds password <rds_db_name>` for a temporary token each time it connects, because the
+tokens expire after about 15 minutes:
+
+> **Internal use only.** `iam_auth` depends on the `rx` CLI, which is Fullscript internal
+> tooling and is not publicly available. Password authentication is the only MySQL option
+> outside Fullscript, and it remains fully supported.
+
+```yaml
+- name: reporting_db
+  type: mysql
+  host: ${MYSQL_HOST} # e.g. your-instance.abc123.us-east-1.rds.amazonaws.com
+  port: 3306
+  user: ${DB_USER}
+  iam_auth: true
+  rds_db_name: your_rds_instance_name # Optional, defaults to the value of `name`
+  database: ${MYSQL_DATABASE}
+```
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `iam_auth` | No | `true` switches the database to IAM tokens. Omitting it keeps password authentication. |
+| `user` | Yes | Your IAM database user. |
+| `rds_db_name` | No | The remote database as named by `rx rds list`. Defaults to `name`, so set it whenever your config alias differs from the RDS name. |
+| `ssl_ca` | No | Not needed in normal use; see below. |
+| `password` | No | Ignored when `iam_auth` is true. |
+
+Requirements for the IAM path:
+* The `rx` CLI must be installed and on your `PATH`.
+* You must be signed in to AWS. If a connection hangs or fails on authentication, run
+  `rx rds password <rds_db_name>` in a terminal once to complete the AWS SSO prompt.
+* IAM connections use the `pymysql` driver (installed with Spellbook). Password connections
+  continue to use `mysql-connector`.
+
+##### A note on TLS and `ssl_ca`
+
+AWS requires TLS for IAM authentication, so Spellbook always negotiates an encrypted
+connection. You do **not** need to set `ssl_ca` — leave it out and you get TLS without
+verifying which server you reached, which is the normal setup.
+
+Set `ssl_ca` only if you also want the server certificate verified. If you do:
+* Point it at the [AWS RDS CA bundle](https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem).
+  Your operating system's bundle will not work, because RDS certificates do not chain to a
+  publicly trusted root; using it fails with `CERTIFICATE_VERIFY_FAILED`.
+* Use the instance's own RDS endpoint as `host`. Verification also checks the hostname, so a
+  CNAME that points at the instance is likely to be rejected even with the right bundle.
+
 ### Methods Overview
 
 
