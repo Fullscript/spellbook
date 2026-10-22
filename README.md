@@ -72,7 +72,6 @@ databases:
     type: mysql
     host: your_host.rds.amazonaws.com
     port: 3306
-    user: ${DB_USER}
     iam_auth: true
     database: ${MYSQL_DATABASE}
 
