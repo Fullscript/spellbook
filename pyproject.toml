@@ -146,6 +146,6 @@ where = ["."]
 include = ["spellbook"]
 
 [tool.setuptools.package-data]
-"spellbook" = ["wizards/*.txt"]
+"spellbook" = ["wizards/*.txt", "py.typed"]
 
 [tool.setuptools_scm]

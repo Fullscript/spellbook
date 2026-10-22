@@ -1,14 +1,28 @@
+import base64
+import logging
 import os
 import re
 import subprocess
-from snowflake.snowpark import Session
-from sqlalchemy import create_engine
+from typing import Any
+from urllib.parse import quote_plus
+
 import pandas as pd
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
-import base64
-from urllib.parse import quote_plus
-from spellbook.utils import load_and_parse_config, get_wizard, load_sql_file
+from snowflake.snowpark import Session
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Connection
+
+from spellbook.exceptions import (
+    AuthenticationError,
+    ConfigError,
+    ConnectionFailedError,
+    DatabaseNotFoundError,
+    QueryError,
+)
+from spellbook.utils import load_and_parse_config, load_sql_file, show_wizard
+
+logger = logging.getLogger(__name__)
 
 
 # Needs a very specific pip install
@@ -24,84 +38,91 @@ _ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
 # Built on first use so that pymysql is only imported when an IAM connection is made.
 _IAM_CURSOR_CLASS = None
 
+SUPPORTED_DB_TYPES = ('snowflake', 'mysql')
 
-def _strip_ansi(text):
+
+def _strip_ansi(text_value: str | None) -> str:
     """
     Remove ANSI colour and cursor codes from CLI output.
-    :param text: The raw text written by the CLI.
+
+    :param text_value: The raw text written by the CLI.
     :return: The same text with escape codes removed.
     """
-    return _ANSI_ESCAPE.sub('', text or '')
+    return _ANSI_ESCAPE.sub('', text_value or '')
 
 
-def get_db_config(db_name):
-    # load the configuration
-    try:
-        config = load_and_parse_config(configurations='databases')
-    except FileNotFoundError:
-        print("Config file not found. Please ensure 'spellbook_config.yaml' exists.")
-        config = None
-
-    for db in config['databases']:
-        if db['name'] == db_name:
-            return db
-    raise ValueError(f"Database configuration for '{db_name}' not found.")
-
-
-def snowflake_connect(db_name, **kwargs):
+def get_db_config(db_name: str) -> dict[str, Any]:
     """
-    Create a Snowflake connection using credentials from the config file or environment variables.
+    Look up a single database block from the configuration file.
+
+    :param db_name: The name of the database as defined in the config file.
+    :return: The configuration for that database.
+    :raises ConfigError: If the configuration file cannot be read.
+    :raises DatabaseNotFoundError: If no database matches the given name.
+    """
+    config = load_and_parse_config(configurations='databases')
+
+    databases = config.get('databases') or []
+    for db in databases:
+        if db.get('name') == db_name:
+            return db
+
+    available = ', '.join(sorted(str(db.get('name')) for db in databases)) or '<none>'
+    raise DatabaseNotFoundError(
+        f"Database configuration for '{db_name}' not found. Available databases: {available}."
+    )
+
+
+def snowflake_connect(db_name: str) -> Session:
+    """
+    Create a Snowflake session using credentials from the config file or environment.
+
     :param db_name: The name of the database as defined in the config file.
     :return: Snowpark session object.
+    :raises AuthenticationError: If the private key cannot be loaded.
+    :raises ConnectionFailedError: If the session cannot be created.
     """
-    db_config = get_db_config(db_name, **kwargs)  # Fetch database config from the config file
+    db_config = get_db_config(db_name)
 
-    # Determine authentication method
     use_private_key = db_config.get('private_key') or os.getenv('SNOW_PK')
 
-    try:
-        if use_private_key:
-            # Private key authentication
-            private_key = db_config.get('private_key')
-            passphrase = db_config.get('private_key_passphrase')
+    settings = {
+        'account': db_config['account'],
+        'user': db_config['user'],
+        'role': db_config['role'],
+        'warehouse': db_config['warehouse'],
+        'database': db_config['database'],
+        'schema': db_config.get('schema', 'public'),
+    }
 
-            # Decode and load the private key
+    if use_private_key:
+        passphrase = db_config.get('private_key_passphrase')
+        try:
             p_key = serialization.load_pem_private_key(
-                base64.b64decode(private_key),
+                base64.b64decode(db_config.get('private_key')),
                 password=passphrase.encode('ascii') if passphrase else None,
-                backend=default_backend()
+                backend=default_backend(),
             )
-            pkb = p_key.private_bytes(
+            settings['private_key'] = p_key.private_bytes(
                 encoding=serialization.Encoding.DER,
                 format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption()
+                encryption_algorithm=serialization.NoEncryption(),
             )
+        except Exception as e:
+            raise AuthenticationError(
+                f"Could not load the private key for Snowflake database '{db_name}': {e}"
+            ) from e
+    else:
+        settings['password'] = db_config.get('password')
 
-            session = Session.builder.configs({
-                'account': db_config['account'],
-                'user': db_config['user'],
-                'private_key': pkb,
-                'role': db_config['role'],
-                'warehouse': db_config['warehouse'],
-                'database': db_config['database'],
-                'schema': db_config.get('schema', 'public')
-            }).create()
-        else:
-            # Username/password authentication
-            session = Session.builder.configs({
-                'account': db_config['account'],
-                'user': db_config['user'],
-                'password': db_config.get('password'),
-                'role': db_config['role'],
-                'warehouse': db_config['warehouse'],
-                'database': db_config['database'],
-                'schema': db_config.get('schema', 'public')
-            }).create()
-
-        return session
+    try:
+        return Session.builder.configs(settings).create()
     except Exception as e:
-        print(f"An error occurred creating the Snowflake session: {e}")
-        return None
+        method = 'private key' if use_private_key else 'password'
+        raise ConnectionFailedError(
+            f"Could not create a Snowflake session for '{db_name}' using {method} "
+            f"authentication: {e}"
+        ) from e
 
 
 def _iam_cursor_class():
@@ -127,7 +148,7 @@ def _iam_cursor_class():
     return _IAM_CURSOR_CLASS
 
 
-def get_rds_iam_token(rds_db_name, timeout=RDS_TOKEN_TIMEOUT):
+def get_rds_iam_token(rds_db_name: str, timeout: int = RDS_TOKEN_TIMEOUT) -> str:
     """
     Generate a temporary AWS RDS IAM authentication token using the `rx` CLI.
 
@@ -137,7 +158,7 @@ def get_rds_iam_token(rds_db_name, timeout=RDS_TOKEN_TIMEOUT):
     :param rds_db_name: The remote database name, as listed by `rx rds list`.
     :param timeout: Seconds to wait for `rx` before giving up.
     :return: The token to use as the connection password.
-    :raises RuntimeError: If `rx` is unavailable, times out, fails, or returns no token.
+    :raises AuthenticationError: If `rx` is unavailable, times out, fails, or returns nothing.
     """
     command = ['rx', 'rds', 'password', rds_db_name]
     printable = ' '.join(command)
@@ -145,13 +166,13 @@ def get_rds_iam_token(rds_db_name, timeout=RDS_TOKEN_TIMEOUT):
     try:
         result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
     except FileNotFoundError:
-        raise RuntimeError(
+        raise AuthenticationError(
             "AWS RDS IAM authentication failed: the 'rx' command is not installed or not on "
             "your PATH. Install the Fullscript developer tooling, or drop 'iam_auth' from the "
             "database configuration to go back to password authentication."
         ) from None
     except subprocess.TimeoutExpired:
-        raise RuntimeError(
+        raise AuthenticationError(
             f"AWS RDS IAM authentication failed: '{printable}' did not finish within {timeout} "
             f"seconds. It is probably waiting on AWS SSO - run '{printable}' in a terminal once "
             "to sign in, then try again."
@@ -159,7 +180,7 @@ def get_rds_iam_token(rds_db_name, timeout=RDS_TOKEN_TIMEOUT):
 
     if result.returncode != 0:
         detail = _strip_ansi(result.stderr or result.stdout or '').strip()
-        raise RuntimeError(
+        raise AuthenticationError(
             f"AWS RDS IAM authentication failed: '{printable}' exited with status "
             f"{result.returncode}. Check that '{rds_db_name}' appears in 'rx rds list' and that "
             f"you are signed in to AWS. Output from rx: {detail or '<none>'}"
@@ -168,14 +189,14 @@ def get_rds_iam_token(rds_db_name, timeout=RDS_TOKEN_TIMEOUT):
     # `rx` writes progress lines before the token, so the token is the last thing it prints.
     lines = [line.strip() for line in _strip_ansi(result.stdout).splitlines() if line.strip()]
     if not lines:
-        raise RuntimeError(
+        raise AuthenticationError(
             f"AWS RDS IAM authentication failed: '{printable}' succeeded but returned no token."
         )
 
     return lines[-1]
 
 
-def mysql_connect(db_name, **kwargs):
+def mysql_connect(db_name: str) -> Connection:
     """
     Create a MySQL connection using either AWS RDS IAM authentication or a stored password.
 
@@ -183,168 +204,163 @@ def mysql_connect(db_name, **kwargs):
     IAM token from `rx rds password`. Without it, the `password` field is used as before.
 
     :param db_name: The name of the database as defined in the config file.
-    :return: SQLAlchemy connection object, or None if the connection could not be made.
+    :return: SQLAlchemy connection object. Close it when you are done with it.
+    :raises AuthenticationError: If an IAM token could not be obtained.
+    :raises ConnectionFailedError: If the connection could not be established.
     """
-    db_config = get_db_config(db_name, **kwargs)
+    db_config = get_db_config(db_name)
+    iam_auth = bool(db_config.get('iam_auth'))
+
     try:
         host = db_config['host']
         port = db_config.get('port', 3306)
         database = db_config['database']
+    except KeyError as e:
+        raise ConfigError(
+            f"MySQL database '{db_name}' is missing the required '{e.args[0]}' field."
+        ) from None
 
-        if db_config.get('iam_auth'):
-            # RDS instance names rarely match the alias used in the config file, so allow an
-            # override and fall back to the alias when the two happen to line up.
-            token = get_rds_iam_token(db_config.get('rds_db_name', db_config['name']))
-            # IAM tokens are URL shaped, so they have to be escaped inside the connection
-            # string. AWS also requires TLS, and only pymysql completes the token handshake.
-            ssl_ca = db_config.get('ssl_ca')
-            connection_string = (
-                f"mysql+pymysql://{quote_plus(db_config['user'])}:{quote_plus(token)}"
-                f"@{host}:{port}/{database}"
-            )
-            # A CA bundle gets the certificate verified too; without one we still insist on
-            # an encrypted connection, we just cannot prove who is on the other end.
-            connect_args = {
-                'ssl': {'ca': ssl_ca} if ssl_ca else {'check_hostname': False},
-                'cursorclass': _iam_cursor_class(),
-            }
-        else:
-            connection_string = (
-                f"mysql+mysqlconnector://{db_config['user']}:{db_config['password']}"
-                f"@{host}:{port}/{database}"
-            )
-            connect_args = {}
-
-        engine = create_engine(connection_string, connect_args=connect_args)
-        con = engine.connect()
-        return con
-    except Exception as e:
-        auth_method = 'AWS RDS IAM' if db_config.get('iam_auth') else 'password'
-        print(
-            f"An error occurred creating the MySQL connection to '{db_name}' "
-            f"using {auth_method} authentication: {e}"
+    if iam_auth:
+        # RDS instance names rarely match the alias used in the config file, so allow an
+        # override and fall back to the alias when the two happen to line up.
+        token = get_rds_iam_token(db_config.get('rds_db_name', db_config['name']))
+        # IAM tokens are URL shaped, so they have to be escaped inside the connection
+        # string. AWS also requires TLS, and only pymysql completes the token handshake.
+        ssl_ca = db_config.get('ssl_ca')
+        connection_string = (
+            f"mysql+pymysql://{quote_plus(db_config['user'])}:{quote_plus(token)}"
+            f"@{host}:{port}/{database}"
         )
-        return None
+        # A CA bundle gets the certificate verified too; without one we still insist on
+        # an encrypted connection, we just cannot prove who is on the other end.
+        connect_args = {
+            'ssl': {'ca': ssl_ca} if ssl_ca else {'check_hostname': False},
+            'cursorclass': _iam_cursor_class(),
+        }
+    else:
+        connection_string = (
+            f"mysql+mysqlconnector://{db_config['user']}:{db_config['password']}"
+            f"@{host}:{port}/{database}"
+        )
+        connect_args = {}
+
+    try:
+        engine = create_engine(connection_string, connect_args=connect_args)
+        return engine.connect()
+    except Exception as e:
+        method = 'AWS RDS IAM' if iam_auth else 'password'
+        raise ConnectionFailedError(
+            f"Could not connect to MySQL database '{db_name}' at {host}:{port} using "
+            f"{method} authentication: {e}"
+        ) from e
 
 
-def read_mysql(db_name, query):
+def read_mysql(db_name: str, query: str) -> pd.DataFrame:
     """
     Read data from a MySQL database into a Pandas DataFrame.
+
     :param db_name: Name of the database as defined in the config file.
-    :param query: SQL query to execute.
-    :return:
+    :param query: SQL query to execute, or the path to a .sql file.
+    :return: A DataFrame of results, with column names lower-cased. Empty if the query
+        matched no rows.
+    :raises QueryError: If the query could not be run.
     """
+    sql = load_sql_file(query)
     con = mysql_connect(db_name)
-    if con is None:
-        return pd.DataFrame()
     try:
-        df = pd.read_sql(
-            load_sql_file(query),
-            con)
+        df = pd.read_sql(sql, con)
         df.columns = df.columns.str.lower()
         return df
     except Exception as e:
-        print(f"An error occurred reading from MySQL: {e}")
-        return pd.DataFrame()
+        raise QueryError(f"Query against MySQL database '{db_name}' failed: {e}") from e
     finally:
         con.close()
 
 
-def execute_mysql(query, dbname):
+def execute_mysql(db_name: str, query: str) -> None:
     """
-    Execute a query on a MySQL database.
-    :param query: SQL query to execute.
-    :param dbname: Database name as defined in the config file.
-    :return:
+    Execute a query on a MySQL database without returning results.
+
+    :param db_name: Database name as defined in the config file.
+    :param query: SQL query to execute, or the path to a .sql file.
+    :raises QueryError: If the query could not be run.
     """
+    sql = load_sql_file(query)
+    con = mysql_connect(db_name)
     try:
-        # Establish a connection and run the query
-        con = mysql_connect(dbname)
-        mycursor = con.connection.cursor()
-        mycursor.execute(
-            load_sql_file(query)
-        )
+        con.execute(text(sql))
+        con.commit()
     except Exception as e:
-        # Handle errors
-        print('An error was encountered executing mysql, ', e)
+        raise QueryError(
+            f"Statement against MySQL database '{db_name}' failed: {e}"
+        ) from e
     finally:
         con.close()
 
 
-def execute_snowflake(db_name, query):
+def execute_snowflake(db_name: str, query: str) -> None:
     """
     Execute a query on Snowflake using Snowpark.
-    :param query: SQL query to execute.
+
     :param db_name: Database name as defined in the config file.
+    :param query: SQL query to execute, or the path to a .sql file.
+    :raises QueryError: If the query could not be run.
     """
+    sql = load_sql_file(query)
+    session = snowflake_connect(db_name)
     try:
-        # Establish session
-        session = snowflake_connect(db_name)
-        if not session:
-            print("Failed to connect to Snowflake.")
-            return
-
-        # Execute query
-        session.sql(
-            load_sql_file(query)
-        ).collect()
-        print("Query executed successfully.")
-
+        session.sql(sql).collect()
+        logger.info("Statement executed successfully against Snowflake database '%s'.", db_name)
     except Exception as e:
-        print(f"An error occurred executing in Snowflake: {e}")
-
+        raise QueryError(f"Statement against Snowflake database '{db_name}' failed: {e}") from e
     finally:
-        if session:
-            session.close()
+        session.close()
 
 
-def read_snowflake(db_name, query):
+def read_snowflake(db_name: str, query: str) -> pd.DataFrame:
     """
     Fetch data from Snowflake into a Pandas DataFrame using Snowpark.
+
     :param db_name: Database name as defined in the config file.
-    :param query: SQL query to fetch data.
-    :return: Pandas DataFrame.
+    :param query: SQL query to execute, or the path to a .sql file.
+    :return: A DataFrame of results, with column names lower-cased. Empty if the query
+        matched no rows.
+    :raises QueryError: If the query could not be run.
     """
+    sql = load_sql_file(query)
+    session = snowflake_connect(db_name)
     try:
-        # Establish session
-        session = snowflake_connect(db_name)
-        if not session:
-            print("Failed to connect to Snowflake.")
-            return pd.DataFrame()
-
-        # Execute query and fetch data
-        df = (session.sql(
-                load_sql_file(query)
-        ).to_pandas())
-        df.columns = df.columns.str.lower()  # Normalize column names
+        df = session.sql(sql).to_pandas()
+        df.columns = df.columns.str.lower()
         return df
-
     except Exception as e:
-        print(f"An error occurred reading from Snowflake: {e}")
-        return pd.DataFrame()
-
+        raise QueryError(f"Query against Snowflake database '{db_name}' failed: {e}") from e
     finally:
-        if session:
-            session.close()
+        session.close()
 
 
-def write_data(db_name, schema, df, table_name, overwrite=True, chunk_size=1000, **kwargs):
+def write_data(
+    db_name: str,
+    schema: str,
+    df: pd.DataFrame,
+    table_name: str,
+    overwrite: bool = True,
+    chunk_size: int = 1000,
+    **kwargs: Any,
+) -> None:
     """
     Write a Pandas DataFrame to a Snowflake table using Snowpark.
+
     :param db_name: Database name as defined in the config file.
     :param schema: Schema where the table exists.
     :param df: Pandas DataFrame to write.
     :param table_name: Table name to write to.
     :param overwrite: Whether to overwrite the table if it exists.
+    :param chunk_size: Number of rows to write per chunk.
+    :raises QueryError: If the data could not be written.
     """
+    session = snowflake_connect(db_name)
     try:
-        # Establish session
-        session = snowflake_connect(db_name)
-        if not session:
-            print("Failed to connect to Snowflake.")
-            return
-
-        # Write DataFrame to Snowflake
         session.write_pandas(
             df=df,
             schema=schema,
@@ -353,64 +369,221 @@ def write_data(db_name, schema, df, table_name, overwrite=True, chunk_size=1000,
             overwrite=overwrite,
             quote_identifiers=False,
             chunk_size=chunk_size,
-            **kwargs
+            **kwargs,
         )
-        print(f"Data written successfully to {schema}.{table_name}.")
-
+        logger.info('Data written successfully to %s.%s.', schema, table_name)
     except Exception as e:
-        print(f"An error occurred writing to Snowflake: {e}")
-
+        raise QueryError(f"Could not write to {schema}.{table_name} in '{db_name}': {e}") from e
     finally:
-        if session:
-            session.close()
+        session.close()
 
 
-def get_data(db_name, query, **kwargs):
+def _require_supported_type(db_name: str, db_config: dict[str, Any]) -> str:
     """
-    Get data from a database
-    :param db_name:  The name of the database as defined in the config file.
-    :param query: SQL query to execute.
-    :return: Returns a pandas dataframe
+    Check that a database block declares a type Spellbook can talk to.
+
+    :param db_name: The name of the database, for the error message.
+    :param db_config: The configuration block for that database.
+    :return: The database type.
+    :raises ConfigError: If the type is missing or unsupported.
     """
-    db_config = get_db_config(db_name, **kwargs)
-    # Call the correct database read function
-    if db_config['type'] == 'snowflake':
-        print(get_wizard())
-        df = read_snowflake(
-            db_name,
-            load_sql_file(query)
+    db_type = db_config.get('type')
+    if db_type not in SUPPORTED_DB_TYPES:
+        raise ConfigError(
+            f"Database '{db_name}' has type {db_type!r}. "
+            f"Valid types are: {', '.join(SUPPORTED_DB_TYPES)}."
         )
-    elif db_config['type'] == 'mysql':
-        print(get_wizard())
-        df = read_mysql(
-            db_name,
-            load_sql_file(query)
-        )
+    return db_type
+
+
+def get_data(db_name: str, query: str) -> pd.DataFrame:
+    """
+    Get data from a database.
+
+    :param db_name: The name of the database as defined in the config file.
+    :param query: SQL query to execute, or the path to a .sql file.
+    :return: A DataFrame of results, with column names lower-cased. Empty if the query
+        matched no rows.
+    :raises ConfigError: If the database is not configured correctly.
+    :raises QueryError: If the query could not be run.
+    """
+    db_config = get_db_config(db_name)
+    db_type = _require_supported_type(db_name, db_config)
+
+    show_wizard()
+
+    if db_type == 'snowflake':
+        return read_snowflake(db_name, query)
+    return read_mysql(db_name, query)
+
+
+def run_sql(db_name: str, query: str) -> None:
+    """
+    Run a SQL statement on a database without returning results.
+
+    :param db_name: The name of the database as defined in the config file.
+    :param query: SQL statement to execute, or the path to a .sql file.
+    :raises ConfigError: If the database is not configured correctly.
+    :raises QueryError: If the statement could not be run.
+    """
+    db_config = get_db_config(db_name)
+    db_type = _require_supported_type(db_name, db_config)
+
+    show_wizard()
+
+    if db_type == 'snowflake':
+        execute_snowflake(db_name, query)
     else:
-        print('Valid database types are, snowflake and mysql')
+        execute_mysql(db_name, query)
+
+
+def list_databases() -> pd.DataFrame:
+    """
+    List the databases available in the configuration file.
+
+    Useful as a starting point when you do not already know what is configured.
+
+    :return: A DataFrame with one row per configured database, with its name, type, and
+        whether it uses AWS RDS IAM authentication. No credentials are included.
+    :raises ConfigError: If the configuration file cannot be read.
+    """
+    config = load_and_parse_config(configurations='databases')
+    rows = [
+        {
+            'name': db.get('name'),
+            'type': db.get('type'),
+            'database': db.get('database'),
+            'iam_auth': bool(db.get('iam_auth')),
+        }
+        for db in config.get('databases') or []
+    ]
+    return pd.DataFrame(rows, columns=['name', 'type', 'database', 'iam_auth'])
+
+
+def list_tables(db_name: str, pattern: str | None = None) -> pd.DataFrame:
+    """
+    List the tables in a database.
+
+    :param db_name: The name of the database as defined in the config file.
+    :param pattern: Optional case-insensitive substring to filter table names by.
+    :return: A DataFrame of table names, and row estimates where the database provides them.
+    :raises ConfigError: If the database is not configured correctly.
+    :raises QueryError: If the catalogue could not be read.
+    """
+    db_config = get_db_config(db_name)
+    db_type = _require_supported_type(db_name, db_config)
+    schema = db_config.get('schema') if db_type == 'snowflake' else db_config.get('database')
+
+    # Parameters are bound rather than interpolated, so a pattern containing '%' or a quote
+    # cannot change the shape of the query.
+    if db_type == 'mysql':
+        sql = """
+            select table_name, table_rows, table_type
+            from information_schema.tables
+            where table_schema = :schema
+              and (:pattern is null or lower(table_name) like lower(:pattern))
+            order by table_name
+        """
+    else:
+        sql = """
+            select table_name, row_count as table_rows, table_type
+            from information_schema.tables
+            where table_schema = :schema
+              and (:pattern is null or lower(table_name) like lower(:pattern))
+            order by table_name
+        """
+
+    params = {'schema': schema, 'pattern': f'%{pattern}%' if pattern else None}
+    return _read_with_params(db_name, db_type, sql, params)
+
+
+def describe_table(db_name: str, table: str) -> pd.DataFrame:
+    """
+    Describe the columns of a table.
+
+    :param db_name: The name of the database as defined in the config file.
+    :param table: The table name.
+    :return: A DataFrame with one row per column, giving its name, type, nullability and
+        default.
+    :raises ConfigError: If the database is not configured correctly.
+    :raises QueryError: If the catalogue could not be read.
+    """
+    db_config = get_db_config(db_name)
+    db_type = _require_supported_type(db_name, db_config)
+    schema = db_config.get('schema') if db_type == 'snowflake' else db_config.get('database')
+
+    sql = """
+        select column_name, data_type, is_nullable, column_default
+        from information_schema.columns
+        where table_schema = :schema
+          and lower(table_name) = lower(:table)
+        order by ordinal_position
+    """
+
+    df = _read_with_params(db_name, db_type, sql, {'schema': schema, 'table': table})
+    if df.empty:
+        raise QueryError(
+            f"Table '{table}' was not found in database '{db_name}'. "
+            f"Use list_tables('{db_name}') to see what is available."
+        )
     return df
 
 
-def run_sql(db_name, query, **kwargs):
+def preview_table(db_name: str, table: str, limit: int = 10) -> pd.DataFrame:
     """
-    Run a SQL query on a database
-    :param db_name:  The name of the database as defined in the config file.
-    :param query:  SQL query to execute.
-    :return: None
+    Read the first few rows of a table.
+
+    :param db_name: The name of the database as defined in the config file.
+    :param table: The table name.
+    :param limit: Maximum number of rows to return.
+    :return: A DataFrame of sample rows.
+    :raises ValueError: If the table name is not a plain identifier, or limit is not positive.
+    :raises QueryError: If the rows could not be read.
     """
-    db_config = get_db_config(db_name, **kwargs)
-    # Call the correct database run function
-    if db_config['type'] == 'snowflake':
-        print(get_wizard())
-        execute_snowflake(
-            db_name,
-            load_sql_file(query)
+    if not re.fullmatch(r'[A-Za-z0-9_$.]+', table or ''):
+        # Table names cannot be bound as parameters, so only accept plain identifiers
+        # rather than interpolating arbitrary text into the query.
+        raise ValueError(
+            f"{table!r} is not a valid table name. Expected letters, digits, underscores, "
+            "dots or dollar signs."
         )
-    elif db_config['type'] == 'mysql':
-        print(get_wizard())
-        execute_mysql(
-            db_name,
-            load_sql_file(query)
-        )
-    else:
-        print('Valid database types are, snowflake and mysql')
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+        raise ValueError(f'limit must be a positive integer, got {limit!r}.')
+
+    return get_data(db_name, f'select * from {table} limit {limit}')
+
+
+def _read_with_params(
+    db_name: str,
+    db_type: str,
+    sql: str,
+    params: dict[str, Any],
+) -> pd.DataFrame:
+    """
+    Run a parameterised catalogue query against either database type.
+
+    :param db_name: The name of the database as defined in the config file.
+    :param db_type: Either 'mysql' or 'snowflake'.
+    :param sql: The SQL to run, using :name style parameters.
+    :param params: Values to bind.
+    :return: A DataFrame of results, with column names lower-cased.
+    :raises QueryError: If the query could not be run.
+    """
+    if db_type == 'snowflake':
+        # Snowpark has no named-parameter binding, so fall back to a literal-safe
+        # substitution of the values we control.
+        rendered = sql
+        for key, value in params.items():
+            literal = 'null' if value is None else "'" + str(value).replace("'", "''") + "'"
+            rendered = rendered.replace(f':{key}', literal)
+        return read_snowflake(db_name, rendered)
+
+    con = mysql_connect(db_name)
+    try:
+        df = pd.read_sql(text(sql), con, params=params)
+        df.columns = df.columns.str.lower()
+        return df
+    except Exception as e:
+        raise QueryError(f"Catalogue query against '{db_name}' failed: {e}") from e
+    finally:
+        con.close()

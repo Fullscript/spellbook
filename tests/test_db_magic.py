@@ -1,8 +1,17 @@
 import subprocess
 
+import pandas as pd
 import pytest
 
 from spellbook import db_magic
+from spellbook.exceptions import (
+    AuthenticationError,
+    ConfigError,
+    ConnectionFailedError,
+    DatabaseNotFoundError,
+    QueryError,
+    SpellbookError,
+)
 
 
 PASSWORD_DB = {
@@ -39,9 +48,16 @@ def engines(monkeypatch):
     """Capture the arguments mysql_connect passes to create_engine."""
     calls = []
 
+    class FakeConnection:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
     class FakeEngine:
         def connect(self):
-            return 'connection'
+            return FakeConnection()
 
     def fake_create_engine(connection_string, **kwargs):
         calls.append((connection_string, kwargs))
@@ -56,7 +72,13 @@ def config(monkeypatch):
     """Point get_db_config at an in-test database list."""
     def use(*databases):
         by_name = {db['name']: db for db in databases}
-        monkeypatch.setattr(db_magic, 'get_db_config', lambda name, **kwargs: by_name[name])
+
+        def get_db_config(name):
+            if name not in by_name:
+                raise DatabaseNotFoundError(f"Database configuration for '{name}' not found.")
+            return by_name[name]
+
+        monkeypatch.setattr(db_magic, 'get_db_config', get_db_config)
     return use
 
 
@@ -80,7 +102,7 @@ def test_password_auth_uses_mysqlconnector(monkeypatch, config, engines):
 
     con = db_magic.mysql_connect('legacy_mysql')
 
-    assert con == 'connection'
+    assert con is not None
     connection_string, kwargs = engines[0]
     assert connection_string == (
         'mysql+mysqlconnector://mysql_user_name:mysql_password'
@@ -116,7 +138,7 @@ def test_iam_auth_builds_a_pymysql_connection_string(monkeypatch, config, engine
 
     con = db_magic.mysql_connect('reporting_db')
 
-    assert con == 'connection'
+    assert con is not None
     connection_string, kwargs = engines[0]
     assert connection_string.startswith('mysql+pymysql://iam_user:')
     assert connection_string.endswith(
@@ -151,7 +173,7 @@ def test_iam_auth_falls_back_to_the_config_alias_for_the_rds_name(monkeypatch, c
         expect=['rx', 'rds', 'password', 'reporting_db'],
     ))
 
-    assert db_magic.mysql_connect('reporting_db') == 'connection'
+    assert db_magic.mysql_connect('reporting_db') is not None
 
 
 def test_iam_auth_verifies_the_certificate_when_a_ca_bundle_is_given(monkeypatch, config, engines):
@@ -257,7 +279,7 @@ def test_token_is_read_from_the_last_line_of_noisy_output(monkeypatch):
 def test_missing_rx_raises_a_clear_error(monkeypatch):
     monkeypatch.setattr(subprocess, 'run', fake_rx(raises=FileNotFoundError('rx')))
 
-    with pytest.raises(RuntimeError, match="'rx' command is not installed"):
+    with pytest.raises(AuthenticationError, match="'rx' command is not installed"):
         db_magic.get_rds_iam_token('example-rds-instance')
 
 
@@ -266,7 +288,7 @@ def test_rx_timeout_raises_a_clear_error(monkeypatch):
         raises=subprocess.TimeoutExpired(cmd='rx', timeout=120),
     ))
 
-    with pytest.raises(RuntimeError, match='did not finish within'):
+    with pytest.raises(AuthenticationError, match='did not finish within'):
         db_magic.get_rds_iam_token('example-rds-instance')
 
 
@@ -275,7 +297,7 @@ def test_rx_failure_surfaces_its_output(monkeypatch):
         returncode=1, stderr='\x1b[;31m✘ database not found\x1b[;m',
     ))
 
-    with pytest.raises(RuntimeError) as error:
+    with pytest.raises(AuthenticationError) as error:
         db_magic.get_rds_iam_token('typo-db')
 
     message = str(error.value)
@@ -288,29 +310,190 @@ def test_rx_failure_surfaces_its_output(monkeypatch):
 def test_empty_rx_output_raises_rather_than_connecting_with_a_blank_password(monkeypatch):
     monkeypatch.setattr(subprocess, 'run', fake_rx(stdout='   \n\n'))
 
-    with pytest.raises(RuntimeError, match='returned no token'):
+    with pytest.raises(AuthenticationError, match='returned no token'):
         db_magic.get_rds_iam_token('example-rds-instance')
 
 
-def test_iam_failure_reports_which_auth_method_failed(monkeypatch, config, capsys):
+# --- Failures raise, and say which auth method failed ------------------------------------
+
+def test_iam_failure_raises_and_names_the_auth_method(monkeypatch, config):
     config(IAM_DB)
     monkeypatch.setattr(subprocess, 'run', fake_rx(raises=FileNotFoundError('rx')))
 
-    assert db_magic.mysql_connect('reporting_db') is None
-
-    output = capsys.readouterr().out
-    assert 'AWS RDS IAM authentication' in output
-    assert 'reporting_db' in output
+    with pytest.raises(AuthenticationError, match='AWS RDS IAM authentication'):
+        db_magic.mysql_connect('reporting_db')
 
 
-def test_password_failure_reports_which_auth_method_failed(monkeypatch, config, capsys):
+def test_password_failure_raises_and_names_the_auth_method(monkeypatch, config):
     config(PASSWORD_DB)
     monkeypatch.setattr(db_magic, 'create_engine', lambda *a, **k: (_ for _ in ()).throw(
         RuntimeError('driver missing')
     ))
 
-    assert db_magic.mysql_connect('legacy_mysql') is None
+    with pytest.raises(ConnectionFailedError) as error:
+        db_magic.mysql_connect('legacy_mysql')
 
-    output = capsys.readouterr().out
-    assert 'password authentication' in output
-    assert 'driver missing' in output
+    message = str(error.value)
+    assert 'password authentication' in message
+    assert 'driver missing' in message
+    assert 'legacy_mysql' in message
+
+
+def test_missing_required_field_raises_config_error(config):
+    config({key: value for key, value in PASSWORD_DB.items() if key != 'host'})
+
+    with pytest.raises(ConfigError, match="missing the required 'host' field"):
+        db_magic.mysql_connect('legacy_mysql')
+
+
+def test_every_spellbook_error_shares_one_base_class():
+    for error in (
+        ConfigError, DatabaseNotFoundError, AuthenticationError,
+        ConnectionFailedError, QueryError,
+    ):
+        assert issubclass(error, SpellbookError)
+    # DatabaseNotFoundError is a configuration problem, so it must be catchable as one.
+    assert issubclass(DatabaseNotFoundError, ConfigError)
+
+
+# --- Query failures surface, zero rows do not --------------------------------------------
+
+@pytest.fixture
+def mysql_results(monkeypatch):
+    """Stub out the connection and pd.read_sql for read-path tests."""
+    class FakeConnection:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    connection = FakeConnection()
+    monkeypatch.setattr(db_magic, 'mysql_connect', lambda name: connection)
+    return connection
+
+
+def test_query_failure_raises_query_error(monkeypatch, mysql_results):
+    monkeypatch.setattr(db_magic.pd, 'read_sql', lambda *a, **k: (_ for _ in ()).throw(
+        RuntimeError("Table 'x' doesn't exist")
+    ))
+
+    with pytest.raises(QueryError, match="doesn't exist"):
+        db_magic.read_mysql('legacy_mysql', 'select * from x')
+
+    assert mysql_results.closed, 'the connection must be closed even when the query fails'
+
+
+def test_zero_rows_is_an_empty_frame_not_an_error(monkeypatch, mysql_results):
+    monkeypatch.setattr(db_magic.pd, 'read_sql', lambda *a, **k: pd.DataFrame(columns=['ID']))
+
+    df = db_magic.read_mysql('legacy_mysql', 'select * from x where 1 = 0')
+
+    assert df.empty
+    assert list(df.columns) == ['id'], 'column names are lower-cased'
+
+
+def test_unsupported_db_type_raises_config_error(config):
+    config({'name': 'weird', 'type': 'postgres'})
+
+    with pytest.raises(ConfigError, match='Valid types are'):
+        db_magic.get_data('weird', 'select 1')
+
+
+# --- run_sql dispatches with the arguments in the right order ----------------------------
+# Regression test: run_sql used to call execute_mysql(db_name, sql) against a signature of
+# (query, dbname), so every MySQL run_sql call failed before reaching the database.
+
+def test_run_sql_passes_db_name_and_query_in_that_order(monkeypatch, config):
+    config(PASSWORD_DB)
+    seen = {}
+    monkeypatch.setattr(db_magic, 'execute_mysql',
+                        lambda db_name, query: seen.update(db=db_name, sql=query))
+
+    db_magic.run_sql('legacy_mysql', 'delete from t where id = 1')
+
+    assert seen == {'db': 'legacy_mysql', 'sql': 'delete from t where id = 1'}
+
+
+def test_execute_mysql_takes_db_name_first(monkeypatch, config, mysql_results):
+    """The signature must match every other function: (db_name, query)."""
+    executed = []
+    mysql_results.execute = lambda statement: executed.append(str(statement))
+    mysql_results.commit = lambda: None
+
+    db_magic.execute_mysql('legacy_mysql', 'delete from t')
+
+    assert executed == ['delete from t']
+
+
+def test_get_data_dispatches_to_mysql(monkeypatch, config):
+    config(PASSWORD_DB)
+    monkeypatch.setattr(db_magic, 'read_mysql',
+                        lambda db_name, query: pd.DataFrame({'n': [1]}))
+
+    assert db_magic.get_data('legacy_mysql', 'select 1').iloc[0, 0] == 1
+
+
+# --- Schema helpers ----------------------------------------------------------------------
+
+def test_preview_table_rejects_names_that_are_not_identifiers(config):
+    config(PASSWORD_DB)
+
+    with pytest.raises(ValueError, match='not a valid table name'):
+        db_magic.preview_table('legacy_mysql', 'users; drop table users')
+
+
+@pytest.mark.parametrize('limit', [0, -1, 'ten', 1.5, True])
+def test_preview_table_rejects_a_bad_limit(config, limit):
+    config(PASSWORD_DB)
+
+    with pytest.raises(ValueError, match='positive integer'):
+        db_magic.preview_table('legacy_mysql', 'users', limit=limit)
+
+
+def test_preview_table_builds_a_limited_select(monkeypatch, config):
+    config(PASSWORD_DB)
+    seen = {}
+    monkeypatch.setattr(db_magic, 'get_data',
+                        lambda db_name, query: seen.update(db=db_name, sql=query))
+
+    db_magic.preview_table('legacy_mysql', 'users', limit=5)
+
+    assert seen['sql'] == 'select * from users limit 5'
+
+
+def test_list_tables_binds_the_pattern_rather_than_interpolating_it(monkeypatch, config):
+    config(PASSWORD_DB)
+    seen = {}
+
+    def fake_read(db_name, db_type, sql, params):
+        seen.update(sql=sql, params=params)
+        return pd.DataFrame()
+
+    monkeypatch.setattr(db_magic, '_read_with_params', fake_read)
+    db_magic.list_tables('legacy_mysql', pattern="o'brien%")
+
+    # The value travels as a bound parameter, so quotes and '%' cannot alter the query.
+    assert seen['params']['pattern'] == "%o'brien%%"
+    assert "o'brien" not in seen['sql']
+    assert seen['params']['schema'] == 'mysql_database'
+
+
+def test_list_tables_without_a_pattern_binds_null(monkeypatch, config):
+    config(PASSWORD_DB)
+    seen = {}
+    monkeypatch.setattr(db_magic, '_read_with_params',
+                        lambda d, t, sql, params: seen.update(params=params) or pd.DataFrame())
+
+    db_magic.list_tables('legacy_mysql')
+
+    assert seen['params']['pattern'] is None
+
+
+def test_describe_table_raises_when_the_table_is_unknown(monkeypatch, config):
+    config(PASSWORD_DB)
+    monkeypatch.setattr(db_magic, '_read_with_params',
+                        lambda *a, **k: pd.DataFrame())
+
+    with pytest.raises(QueryError, match='was not found'):
+        db_magic.describe_table('legacy_mysql', 'nope')
