@@ -45,10 +45,6 @@ databases:
     iam_auth: true # Use an AWS RDS IAM token instead of a password
     rds_db_name: your_rds_instance_name # Optional, as named by `rx rds list`; defaults to `name`
     database: ${MYSQL_DATABASE}
-    # No `user` is needed: the token names the user it was issued for. Set one only to
-    # pin it, in which case it has to match the token.
-    # The connection is always encrypted. Add `ssl_ca` only to verify the server
-    # certificate as well - see documentation/db_magic.md for the caveats.
 
 google_accounts:
   # Google Sheets Service Account 1
