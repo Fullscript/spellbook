@@ -33,6 +33,17 @@ databases:
     password: mysql_password
     database: mysql_database
 
+  # MySQL Database Connection using AWS RDS IAM authentication.
+  # Requires the `rx` CLI, which is Fullscript internal tooling.
+  - name: alias_of_your_connection_3
+    type: mysql
+    host: ${MYSQL_HOST} # e.g. your-instance.abc123.us-east-1.rds.amazonaws.com
+    port: 3306
+    user: ${DB_USER} # Your IAM database user
+    iam_auth: true # Use an AWS RDS IAM token instead of a password
+    rds_db_name: your_rds_instance_name # Optional, as named by `rx rds list`; defaults to `name`
+    database: ${MYSQL_DATABASE}
+
 google_accounts:
   # Google Sheets Service Account 1
   - name: google_sheets_service_account_1
